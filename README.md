@@ -33,6 +33,18 @@ works without internet, and keeps everything on the iPad.
 
 ## Putting it on the iPad
 
+**Live address: https://akinborodehayzed-creator.github.io/talkboard/**
+
+1. On the iPad, open that address in **Safari**.
+2. Tap **Share** (square with an up arrow) → **Add to Home Screen** → **Add**.
+3. Open **Talk Board** from the Home Screen. It works offline from then on.
+
+To publish changes later, edit the files, change `CACHE` in `sw.js` to a new name, then commit
+and push to GitHub. The iPad picks up the new version the next time it opens the app online.
+
+The app is hosted with GitHub Pages from the `talkboard` repository. The sections below explain
+other ways to host it.
+
 The iPad needs to load the app from a web address once. After that it works offline.
 
 ### Option A (recommended): free web hosting, works anywhere and offline
