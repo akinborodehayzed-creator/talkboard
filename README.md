@@ -21,6 +21,12 @@ works without internet, and keeps everything on the iPad.
 - **Quick phrases** for urgent things: "I need help", "I need a break", "I need the toilet",
   "Something hurts"…
 - **🔍 Show** puts the sentence in huge letters, for noisy places.
+- **📋 Activity pages:** Snack time, Bath time, Bubbles & play, Getting dressed, Bedtime, Park &
+  outside and Car ride. Each page has all the words for that activity and stays open while you use
+  it. Grown-ups can add their own pages in Edit mode.
+- **🎮 Find it!** is a learning game. The app asks "Can you find the bird?", cheers and gives a star
+  for the right picture, and gently shows the answer after a wrong try. You choose the topic and
+  how many pictures to show (2–6).
 - **Your own voice.** Record yourself saying any word or phrase, and that button plays your real
   voice instead of the iPad voice. Hold ⚙️ → Voice → **Record my voice for many words** takes you
   through every word one by one. You can also record a single button in Edit mode. Silence is
