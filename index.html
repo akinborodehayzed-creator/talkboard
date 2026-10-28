@@ -466,7 +466,7 @@ function defaultState() {
       speakOnTap: true,
       speakFolders: false,
       clearAfterSpeak: false,
-      goHomeAfterFolder: true,
+      goHomeAfterFolder: false,
       tapGuard: 300,
       showPhrases: true,
       voiceURI: '',
@@ -507,6 +507,8 @@ function load() {
     data.settings = { ...def.settings, ...(data.settings || {}) };
     data.phrases = data.phrases || def.phrases;
     data.history = data.history || [];
+    // From v8, folders stay open after picking a word unless a folder is set to go back Home
+    if (!data.settings.foldersStayV8) { data.settings.goHomeAfterFolder = false; data.settings.foldersStayV8 = true; }
     return data;
   } catch (e) { return null; }
 }
@@ -1355,7 +1357,8 @@ function pressTile(i, node) {
   message.push({ label: item.label, speak: item.speak, emoji: item.emoji, image: item.image, color: item.color });
   renderMessage();
   if (state.settings.speakOnTap) speakItems([item]);
-  if (id !== 'home' && state.settings.goHomeAfterFolder) setTimeout(goHome, 150);
+  const after = state.boards[id].afterPick;  // a folder's own choice wins over the general setting
+  if (id !== 'home' && (after ? after === 'home' : state.settings.goHomeAfterFolder)) setTimeout(goHome, 150);
 }
 
 function speakMessage() {
@@ -1568,7 +1571,7 @@ function renderSettings() {
   if (settingsTab === 'speaking') {
     body.append(
       toggleRow('speakOnTap', 'Say each word when tapped', 'Hearing the word straight away helps learning.'),
-      toggleRow('goHomeAfterFolder', 'Go back Home after picking from a folder', 'Makes it quicker to build “I want … apple”.'),
+      toggleRow('goHomeAfterFolder', 'Go back Home after picking from a folder', 'Off: the folder stays open so your child can pick more from it. You can also set this for each folder in Edit mode.'),
       toggleRow('speakFolders', 'Say folder names when opened'),
       toggleRow('clearAfterSpeak', 'Clear the message after speaking'),
       toggleRow('showPhrases', 'Show quick phrases', 'The row of ready-made sentences under the message bar.'),
@@ -1817,6 +1820,7 @@ function openEditor(t) {
   } else {
     const b = state.boards[t.boardId];
     draft = t.index >= 0 ? { ...b.buttons[t.index] } : { type: 'word', label: '', emoji: '⭐', color: t.boardId === 'home' ? 'little' : 'thing' };
+    if (draft.type === 'folder' && state.boards[draft.target]) draft.afterPick = state.boards[draft.target].afterPick || '';
   }
   renderEditor();
   $('#editorModal').classList.add('open');
@@ -1864,6 +1868,12 @@ function renderEditor() {
       el('div', { class: 'row' },
         el('button', { class: 'btn' + (draft.type !== 'folder' ? ' primary' : ''), onclick: () => { draft.type = 'word'; if (draft.color === 'folder') draft.color = 'thing'; renderEditor(); } }, '💬 Word (says something)'),
         el('button', { class: 'btn' + (draft.type === 'folder' ? ' primary' : ''), onclick: () => { draft.type = 'folder'; draft.color = 'folder'; renderEditor(); } }, '📂 Folder (opens more buttons)'))),
+    isPhrase || draft.type !== 'folder' ? null : el('div', { class: 'field' },
+      el('div', { class: 'flabel', text: 'After choosing a word in this folder…' }),
+      el('div', { class: 'row' },
+        [['', 'Use the general setting'], ['stay', '📂 Stay in this folder'], ['home', '🏠 Go back Home']].map(([v, t]) =>
+          el('button', { class: 'btn' + ((draft.afterPick || '') === v ? ' primary' : ''), onclick: () => { draft.afterPick = v; renderEditor(); } }, t))),
+      el('div', { class: 'help', text: 'Stay: good for activities like snack time, where your child picks several things. Go Home: quicker for sentences like “I want … apple”.' })),
     !isPhrase && !isNew && draft.type === 'folder' && state.boards[draft.target] ?
       el('div', { class: 'field' }, el('button', { class: 'btn primary', onclick: () => { closeModal('#editorModal'); openBoard(draft.target); } },
         '📂 Open this folder to edit the buttons inside')) : null,
@@ -1895,8 +1905,10 @@ function saveItem() {
   }
   if (target.kind === 'button' && draft.type === 'folder' && state.boards[draft.target]) {
     state.boards[draft.target].name = draft.label;
+    if (draft.afterPick) state.boards[draft.target].afterPick = draft.afterPick; else delete state.boards[draft.target].afterPick;
   }
   if (target.kind === 'button' && draft.type !== 'folder') delete draft.target;
+  delete draft.afterPick;
   const list = listFor(target);
   if (target.index < 0) list.push(draft); else list[target.index] = draft;
   if (save()) {
@@ -1973,7 +1985,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {
