@@ -239,6 +239,13 @@
   .progress div { height: 100%; background: var(--accent); }
   .session .progress { height: 10px; background: #E7ECF2; border-radius: 6px; overflow: hidden; margin: 6px 0 18px; }
   .session .progress div { height: 100%; background: var(--accent); }
+  #updateBanner {
+    display: none; align-items: center; justify-content: center; gap: 14px; background: #DDF6E6; color: #0B5B2E;
+    font-weight: 700; font-size: 17px; padding: 8px 12px; margin: 8px 10px 0; border-radius: 12px;
+  }
+  #updateBanner.show { display: flex; }
+  #updateBanner button { border: 0; border-radius: 10px; background: #12873F; color: #fff; font-weight: 700; padding: 8px 16px; }
+  .version { font-size: 14px; color: var(--muted); font-weight: 600; }
   #toast {
     position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: #1D2430; color: #fff; padding: 12px 20px; border-radius: 14px; font-weight: 600; z-index: 40;
@@ -255,6 +262,7 @@
 </head>
 <body>
 
+<div id="updateBanner">✨ A new version of Talk Board is ready. <button id="updateNow">Update now</button></div>
 <div id="top">
   <button class="navbtn" id="homeBtn" aria-label="Home"><span class="ico">🏠</span>Home</button>
   <button class="navbtn" id="backBtn" aria-label="Back"><span class="ico">⬅️</span>Back</button>
@@ -277,7 +285,7 @@
 <!-- Settings -->
 <div class="modal-back" id="settingsModal">
   <div class="modal">
-    <header><h2>Grown-up settings</h2><button class="btn" data-close>Close</button></header>
+    <header><h2>Grown-up settings <span class="version" id="versionLabel"></span></h2><button class="btn" data-close>Close</button></header>
     <div class="tabs" id="settingsTabs"></div>
     <div class="body" id="settingsBody"></div>
   </div>
@@ -1559,6 +1567,9 @@ function renderSettings() {
         el('li', { text: 'Talk to a speech and language therapist (SLT/SLP) — they can help choose words and set goals.' })),
       el('h3', { text: 'Lock the iPad into this app (Guided Access)' }),
       el('p', { text: 'iPad Settings → Accessibility → Guided Access → turn on and set a passcode. Open Talk Board, then triple-click the top (or Home) button to start. The child can’t leave the app until you triple-click and enter the passcode.' }),
+      el('h3', { text: 'Updates' }),
+      el('p', {}, `You have version ${APP_VERSION}. The app checks for a new version every time it opens. `,
+        el('button', { class: 'btn small', onclick: async () => { if (!(await checkForUpdate(false))) toast(navigator.onLine ? 'You have the newest version.' : 'Connect to the internet to check for updates.'); } }, 'Check now')),
       el('h3', { text: 'No sound?' }),
       el('p', { text: 'Check the iPad volume buttons, make sure Silent mode is off (swipe down from the top-right corner), and try another voice in the Voice tab.' })
     ));
@@ -1872,6 +1883,50 @@ function shrinkImage(file, max) {
 /* Stop iPad double-tap zoom and pinch on the board */
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
+
+/* =========================================================
+   Updates
+   The app asks the website for its latest version number each
+   time it opens or comes back on screen, and swaps in the new
+   version. Buttons, photos and recordings are kept.
+   Bump APP_VERSION here and in version.json for each release.
+   ========================================================= */
+const APP_VERSION = 5;
+$('#versionLabel').textContent = 'v' + APP_VERSION;
+
+async function checkForUpdate(auto) {
+  if (!navigator.onLine) return false;
+  let latest;
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    latest = (await r.json()).version;
+  } catch (e) { return false; }
+  if (!(latest > APP_VERSION)) return false;
+  let tried = null;
+  try { tried = sessionStorage.getItem('tb-update-tried'); } catch (e) {}
+  // Update straight away on launch, but only once, so a stubborn cache can’t cause a reload loop
+  if (auto && tried !== String(latest)) return applyUpdate(latest);
+  $('#updateBanner').classList.add('show');
+  return true;
+}
+
+async function applyUpdate(latest) {
+  try { sessionStorage.setItem('tb-update-tried', String(latest || '')); } catch (e) {}
+  $('#updateBanner').replaceChildren('Updating Talk Board…');
+  $('#updateBanner').classList.add('show');
+  try {
+    const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
+    await Promise.all(regs.map(r => r.update().catch(() => {})));
+  } catch (e) {}
+  try { for (const k of await caches.keys()) await caches.delete(k); } catch (e) {}
+  location.replace(location.pathname + '?v=' + (latest || Date.now()));
+  return true;
+}
+
+$('#updateNow').addEventListener('click', () => applyUpdate());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(false); });
+setInterval(() => checkForUpdate(false), 30 * 60 * 1000);
+setTimeout(() => checkForUpdate(true), 500);
 
 /* Offline support when served over https */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

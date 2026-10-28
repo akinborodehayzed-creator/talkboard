@@ -1,6 +1,6 @@
 // Offline support: keep a copy of the app on the iPad so it works with no internet.
 // Bump CACHE when you change any file so iPads pick up the new version.
-const CACHE = 'talkboard-v4';
+const CACHE = 'talkboard-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -25,14 +25,16 @@ self.addEventListener('activate', e => {
 // Try the internet first (so updates arrive straight away), and fall back to the
 // saved copy when the iPad is offline or the connection is too slow.
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.pathname.endsWith('/version.json')) return;  // always ask the website, never the saved copy
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const fromNetwork = fetch(e.request, { cache: 'no-cache' }).then(resp => {
       if (resp && resp.ok) cache.put(e.request, resp.clone());
       return resp;
     });
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('slow')), 3000));
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('slow')), 8000));
     try {
       return await Promise.race([fromNetwork, timeout]);
     } catch (err) {

@@ -51,8 +51,10 @@ works without internet, and keeps everything on the iPad.
 2. Tap **Share** (square with an up arrow) → **Add to Home Screen** → **Add**.
 3. Open **Talk Board** from the Home Screen. It works offline from then on.
 
-To publish changes later, edit the files, change `CACHE` in `sw.js` to a new name, then commit
-and push to GitHub. The iPad picks up the new version the next time it opens the app online.
+To publish changes later: edit the files, raise `APP_VERSION` in `index.html` and the number in
+`version.json` (keep them equal), change `CACHE` in `sw.js` to a new name, then commit and push.
+Each time the app is opened or brought back on screen while online, it checks `version.json`
+and updates itself. The version in use is shown next to "Grown-up settings".
 
 The app is hosted with GitHub Pages from the `talkboard` repository. The sections below explain
 other ways to host it.
