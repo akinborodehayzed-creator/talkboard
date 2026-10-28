@@ -228,6 +228,13 @@
   .recorder .btn:disabled { opacity: .4; }
   .rec-status { color: var(--muted); font-weight: 600; }
   @keyframes pulse { 50% { opacity: .7; } }
+  .voicelist { max-height: 340px; overflow-y: auto; border: 2px solid var(--line); border-radius: 14px; }
+  .voicerow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #EEF1F5; }
+  .voicerow:last-child { border-bottom: 0; }
+  .voicerow.on { background: #E3F4F6; }
+  .voicerow .vinfo { flex: 1; min-width: 0; }
+  .voicerow .vname { font-weight: 700; font-size: 17px; }
+  .voicerow .inuse { font-weight: 800; color: var(--accent); padding: 0 8px; white-space: nowrap; }
   .keyfix { margin-top: 16px; background: #FFF4E5; border: 2px solid #F5C27A; border-radius: 14px; padding: 14px 16px; }
   .keyfix ol { margin: 0 0 12px; padding-left: 22px; line-height: 1.5; }
   .story { font-size: 22px; line-height: 1.6; background: #F6F8FB; border-radius: 14px; padding: 16px 18px; -webkit-user-select: text; user-select: text; }
@@ -968,7 +975,7 @@ function updateGen() {
   const ready = voicedCount();
   box.replaceChildren(...[
     el('div', { style: 'font-weight:700' },
-      gen.running ? `Making words in your voice… ${gen.done} of ${gen.total}` : `${ready} of ${total} words are ready in your voice`),
+      gen.running ? `Making words… ${gen.done} of ${gen.total}` : `${ready} of ${total} words are ready in this voice`),
     el('div', { class: 'progress' }, el('div', { style: `width:${gen.running ? (gen.total ? gen.done / gen.total * 100 : 0) : (total ? ready / total * 100 : 0)}%` })),
     gen.error ? el('div', { style: 'color:var(--danger); font-weight:600', text: 'Stopped: ' + gen.error }) : null,
     el('div', { class: 'row' },
@@ -981,18 +988,67 @@ function updateGen() {
 
 async function aiCheck() {
   const box = document.getElementById('aiAccount');
+  aiVoicesError = '';
   try {
     const sub = await (await aiFetch('/user/subscription')).json();
     const used = sub.character_count, limit = sub.character_limit;
     aiAccount = `✅ Connected — ${sub.tier || 'your'} plan` + (limit ? `, ${Number(used).toLocaleString()} of ${Number(limit).toLocaleString()} characters used this month` : '');
-    const v = await (await aiFetch('/voices')).json();
-    aiVoices = (v.voices || []).map(x => ({ id: x.voice_id, name: x.name, category: x.category }));
   } catch (e) {
-    aiAccount = '❌ ' + e.message;
-    aiVoices = null;
+    // A restricted key may not be allowed to read the account; that's fine for speaking
+    aiAccount = e.keyProblem && /user_read/.test(e.message) ? '✅ Key saved (it can’t show your monthly usage — that’s fine)' : '❌ ' + e.message;
+  }
+  try {
+    const v = await (await aiFetch('/voices')).json();
+    aiVoices = (v.voices || []).map(x => ({
+      id: x.voice_id, name: x.name, category: x.category, preview: x.preview_url, labels: x.labels || {}
+    }));
+  } catch (e) {
+    aiVoices = [];
+    aiVoicesError = e.message;
   }
   if (box) box.textContent = aiAccount;
   if (settingsTab === 'ai' && $('#settingsModal').classList.contains('open')) renderSettings();
+}
+
+/* ---- Choosing a voice from the ElevenLabs account ---- */
+let aiVoicesError = '';
+let previewAudio = null;
+
+function playPreview(url) {
+  stopSpeaking();
+  if (previewAudio) previewAudio.pause();
+  previewAudio = new Audio(url);
+  previewAudio.play().catch(() => toast('Could not play the sample. Check the internet connection.'));
+}
+
+async function chooseVoice(v) {
+  if (v.id === ai.voiceId) return;
+  if (aiCount() && !confirm(`Switch to “${v.name}”? Words made in the old voice will be made again in the new one.`)) return;
+  if (previewAudio) previewAudio.pause();
+  await aiClearClips();
+  ai.voiceId = v.id;
+  ai.voiceName = v.name;
+  saveAI();
+  renderSettings();
+  const chars = aiTodo().reduce((n, x) => n + x.text.length, 0);
+  if (confirm(`“${v.name}” is now Talk Board’s voice. Make all the words in this voice now? (Uses about ${chars.toLocaleString()} characters.)`)) aiMakeAll();
+}
+
+function voicePicker(options) {
+  const own = c => c === 'cloned' || c === 'generated' || c === 'professional';
+  const sorted = options.slice().sort((a, b) => (own(b.category) - own(a.category)) || a.name.localeCompare(b.name));
+  return el('div', { class: 'voicelist' }, sorted.map(v => {
+    const l = v.labels || {};
+    const info = [l.gender, l.age, l.accent, l.description || l.descriptive, l.use_case].filter(Boolean).join(' · ');
+    const inUse = v.id === ai.voiceId;
+    return el('div', { class: 'voicerow' + (inUse ? ' on' : '') },
+      el('div', { class: 'vinfo' },
+        el('div', { class: 'vname', text: v.name + (v.category === 'cloned' ? ' — your copy' : '') }),
+        info ? el('div', { class: 'help', style: 'margin:0', text: info }) : null),
+      v.preview ? el('button', { class: 'btn small', onclick: () => playPreview(v.preview) }, '▶️ Sample') : null,
+      inUse ? el('span', { class: 'inuse', text: '✓ In use' })
+            : el('button', { class: 'btn small primary', onclick: () => chooseVoice(v) }, 'Use this voice'));
+  }));
 }
 
 /* ---- Recording a reading sample to copy the voice ---- */
@@ -1473,36 +1529,30 @@ function renderSettings() {
     if (ai.voiceId && !voiceOptions.some(v => v.id === ai.voiceId)) voiceOptions.unshift({ id: ai.voiceId, name: ai.voiceName || 'My voice' });
     const genBox = el('div', { id: 'genStatus', style: 'margin-bottom:8px' });
     body.append(...[
-      el('p', { text: 'Copy your voice with ElevenLabs, an AI voice service. You read a short story out loud for about a minute, and the AI learns how you sound. Then the app makes every word in your voice and saves them on the iPad, so it still works offline. Words you recorded yourself are still used first.' }),
+      el('p', { text: 'Use a natural-sounding voice from ElevenLabs, an AI voice service: pick one of their voices, or copy your own. The app makes every word in that voice once and saves them on the iPad, so it still works offline. Words you recorded yourself are still used first.' }),
       el('h3', { style: 'margin:18px 0 6px', text: 'Step 1 — Connect ElevenLabs' }),
       el('div', { class: 'field' },
         el('div', { class: 'row' }, keyInput,
           el('button', { class: 'btn primary', onclick: () => { ai.key = keyInput.value.trim(); saveAI(); aiAccount = ai.key ? 'Checking…' : ''; renderSettings(); if (ai.key) aiCheck(); } }, 'Save key')),
         el('div', { class: 'help', id: 'aiAccount', style: 'font-weight:600', text: aiAccount }),
         el('div', { class: 'help', text: 'Sign up at elevenlabs.io (copying a voice needs the Starter plan or higher). Then go to your profile → API Keys → Create key. Before saving it, turn off “Restrict key” (or allow Text to Speech, Voices → Write and User → Read). Paste it here. The key is kept only on this iPad and is never put in backups.' })),
-      ai.key ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 2 — Your AI voice' }) : null,
+      ai.key ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 2 — Choose a voice' }) : null,
       ai.key ? el('div', { class: 'field' },
-        el('div', { class: 'row' },
-          el('button', { class: 'btn primary', onclick: () => { closeModal('#settingsModal'); openClone(); } }, '🎙️ Copy my voice (read a short story)'),
-          aiReady() ? el('button', { class: 'btn', onclick: async () => {
-            try { await playBlob(await aiSpeech('Hello! I can talk with my pictures.')); } catch (e) { toast(e.message); }
-          } }, '▶️ Test my AI voice') : null),
-        voiceOptions.length ? el('div', { style: 'margin-top:12px' },
-          el('label', { style: 'font-weight:700', text: 'Voice in use' }),
-          el('select', { style: 'width:100%; font-size:18px; padding:12px; border-radius:12px; border:2px solid var(--line); margin-top:6px', onchange: async e => {
-            const id = e.target.value;
-            if (id === ai.voiceId) return;
-            if (aiCount() && !confirm('Switch voice? The words already made in the old voice will be deleted and need making again.')) { e.target.value = ai.voiceId || ''; return; }
-            await aiClearClips();
-            ai.voiceId = id || '';
-            ai.voiceName = (voiceOptions.find(v => v.id === id) || {}).name || '';
-            saveAI();
-            renderSettings();
-          } },
-            el('option', { value: '', text: '— choose a voice —' }),
-            voiceOptions.map(v => el('option', { value: v.id, selected: v.id === ai.voiceId, text: v.name + (v.category === 'cloned' ? ' (your copy)' : '') }))),
-          el('div', { class: 'help', text: 'Made a voice on the ElevenLabs website instead? It shows up in this list too.' })) : null) : null,
-      aiReady() ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 3 — Make every word in your voice' }) : null,
+        el('div', { class: 'help', style: 'margin:0 0 8px', text: 'These are the voices in your ElevenLabs account. Tap ▶️ Sample to hear one (free), then “Use this voice”.' }),
+        aiVoicesError ? el('div', { class: 'keyfix', style: 'margin:0 0 8px' },
+          el('div', { style: 'font-weight:700', text: '❌ ' + aiVoicesError }),
+          el('div', { class: 'help', text: 'If your key is restricted, it needs Voices → Read (and Text to Speech → Access) turned on at elevenlabs.io → API Keys. Then paste the new key in Step 1.' })) : null,
+        aiVoices === null ? el('div', { class: 'help', text: 'Loading your voices…' }) : voiceOptions.length ? voicePicker(voiceOptions) : null,
+        el('div', { class: 'row', style: 'margin-top:10px' },
+          el('button', { class: 'btn small', onclick: () => { aiVoices = null; aiAccount = 'Checking…'; renderSettings(); aiCheck(); } }, '🔄 Refresh list'),
+          aiReady() ? el('button', { class: 'btn small', onclick: async () => {
+            try { await playBlob(await aiSpeech('Hello! I can talk with my pictures. I want to play outside.')); } catch (e) { toast(e.message); }
+          } }, `▶️ Hear “${ai.voiceName || 'this voice'}” in Talk Board`) : null),
+        el('div', { class: 'help', text: 'Tip: many families pick a voice that sounds like a child of the same age and gender, so it feels like the child’s own voice. On the ElevenLabs website, open the Voice Library, add a voice you like to “My Voices”, then tap Refresh list here.' }),
+        el('div', { class: 'row', style: 'margin-top:10px' },
+          el('span', { style: 'font-weight:600', text: 'Or use your own voice:' }),
+          el('button', { class: 'btn small', onclick: () => { closeModal('#settingsModal'); openClone(); } }, '🎙️ Copy my voice (read a short story)'))) : null,
+      aiReady() ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 3 — Make every word in this voice' }) : null,
       aiReady() ? genBox : null,
       aiReady() ? toggleRow('useAIVoice', 'Use the AI voice', 'For words you haven’t recorded yourself.') : null,
       aiReady() ? toggleRow('aiSentences', 'Say whole sentences in the AI voice when online', 'Sounds smoother than word by word. Offline, it uses the saved words.') : null,
@@ -1923,7 +1973,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {

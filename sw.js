@@ -1,6 +1,6 @@
 // Offline support: keep a copy of the app on the iPad so it works with no internet.
 // Bump CACHE when you change any file so iPads pick up the new version.
-const CACHE = 'talkboard-v6';
+const CACHE = 'talkboard-v7';
 const ASSETS = [
   './',
   './index.html',
