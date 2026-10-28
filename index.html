@@ -228,6 +228,8 @@
   .recorder .btn:disabled { opacity: .4; }
   .rec-status { color: var(--muted); font-weight: 600; }
   @keyframes pulse { 50% { opacity: .7; } }
+  .keyfix { margin-top: 16px; background: #FFF4E5; border: 2px solid #F5C27A; border-radius: 14px; padding: 14px 16px; }
+  .keyfix ol { margin: 0 0 12px; padding-left: 22px; line-height: 1.5; }
   .story { font-size: 22px; line-height: 1.6; background: #F6F8FB; border-radius: 14px; padding: 16px 18px; -webkit-user-select: text; user-select: text; }
   .session { text-align: center; }
   .session .big-sym { font-size: 96px; line-height: 1.1; }
@@ -866,14 +868,18 @@ async function aiFetch(path, opts) {
   const r = await fetch(AI_API + path, { ...opts, headers: { 'xi-api-key': ai.key, ...(opts.headers || {}) } });
   if (!r.ok) {
     let msg = '';
+    let perm = false;
     try {
       const j = await r.json();
       const d = j.detail;
       msg = typeof d === 'string' ? d : d && (d.message || (Array.isArray(d) && d.map(x => x.msg).join('; '))) || '';
+      if (d && d.status === 'missing_permissions') perm = true;
     } catch (e) {}
-    if (r.status === 401) msg = 'The ElevenLabs key was not accepted. ' + msg;
+    if (r.status === 401 && !perm) msg = 'The ElevenLabs key was not accepted. ' + msg;
+    if (perm) msg = 'Your ElevenLabs key is not allowed to do this yet. ' + msg;
     const err = new Error(msg || `ElevenLabs returned error ${r.status}`);
     err.status = r.status;
+    err.keyProblem = perm || r.status === 401;
     throw err;
   }
   return r;
@@ -1005,7 +1011,8 @@ const CLONE_STORY = 'Good morning, sweetheart! Did you sleep well? Let’s get u
 const clone = { blob: null, secs: 0, recording: false, busy: false, consent: false, name: 'My voice', timer: null, status: '' };
 
 function openClone() {
-  Object.assign(clone, { blob: null, secs: 0, recording: false, busy: false, status: '' });
+  // A finished story recording is kept, so a key problem doesn't mean reading it all again
+  Object.assign(clone, { recording: false, busy: false, status: '', needKey: false });
   renderClone();
   $('#cloneModal').classList.add('open');
 }
@@ -1033,8 +1040,28 @@ function renderClone() {
       el('input', { type: 'checkbox', checked: clone.consent, onchange: e => { clone.consent = e.target.checked; renderClone(); } })),
     el('div', { class: 'row', style: 'margin-top:16px' },
       el('button', { class: 'btn primary', disabled: !ready, onclick: cloneCreate }, clone.busy ? 'Creating…' : '✨ Create my AI voice'),
-      clone.status ? el('span', { class: 'rec-status', text: clone.status }) : null)
+      clone.status ? el('span', { class: 'rec-status', text: clone.status }) : null),
+    clone.needKey ? keyFixBox(() => { clone.needKey = false; cloneCreate(); }) : null
   ].filter(Boolean));
+}
+
+/* Steps for making an ElevenLabs key with the right permissions, plus a box to paste it */
+function keyFixBox(retry) {
+  const input = el('input', { type: 'password', placeholder: 'Paste the new key here', autocomplete: 'off', style: 'flex:1; min-width:220px; font-size:18px; padding:12px; border-radius:12px; border:2px solid var(--line)' });
+  return el('div', { class: 'keyfix' },
+    el('div', { style: 'font-weight:800; margin-bottom:6px', text: 'Fix: make a key that is allowed to copy voices' }),
+    el('ol', {},
+      el('li', { text: 'On elevenlabs.io, open your profile → API Keys.' }),
+      el('li', { text: 'Tap “Create API Key” (or edit your key).' }),
+      el('li', { text: 'Either turn off “Restrict key”, or set these to allowed: Text to Speech → Access, Voices → Write, User → Read.' }),
+      el('li', { text: 'Create it, copy the key, and paste it below. Your story recording is kept, so you don’t need to read it again.' })),
+    el('div', { class: 'row' }, input,
+      el('button', { class: 'btn primary', onclick: () => {
+        const k = input.value.trim();
+        if (!k) return toast('Paste the new key first.');
+        ai.key = k; saveAI(); aiVoices = null; aiAccount = '';
+        retry();
+      } }, 'Save key and try again')));
 }
 
 async function cloneStart() {
@@ -1082,9 +1109,14 @@ async function cloneCreate() {
     else if (confirm('Your AI voice is ready! Make all the words in your voice now?')) aiMakeAll();
   } catch (e) {
     clone.status = '❌ ' + e.message;
+    clone.needKey = !!e.keyProblem;
   }
   clone.busy = false;
-  if ($('#cloneModal').classList.contains('open')) renderClone();
+  if ($('#cloneModal').classList.contains('open')) {
+    renderClone();
+    const fix = document.querySelector('#cloneBody .keyfix');
+    if (fix) fix.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 
 /* A Record / Play / Remove control for one word or phrase.
@@ -1447,7 +1479,7 @@ function renderSettings() {
         el('div', { class: 'row' }, keyInput,
           el('button', { class: 'btn primary', onclick: () => { ai.key = keyInput.value.trim(); saveAI(); aiAccount = ai.key ? 'Checking…' : ''; renderSettings(); if (ai.key) aiCheck(); } }, 'Save key')),
         el('div', { class: 'help', id: 'aiAccount', style: 'font-weight:600', text: aiAccount }),
-        el('div', { class: 'help', text: 'Sign up at elevenlabs.io (copying a voice needs the Starter plan or higher). Then go to your profile → API Keys → Create key, and paste it here. The key is kept only on this iPad and is never put in backups.' })),
+        el('div', { class: 'help', text: 'Sign up at elevenlabs.io (copying a voice needs the Starter plan or higher). Then go to your profile → API Keys → Create key. Before saving it, turn off “Restrict key” (or allow Text to Speech, Voices → Write and User → Read). Paste it here. The key is kept only on this iPad and is never put in backups.' })),
       ai.key ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 2 — Your AI voice' }) : null,
       ai.key ? el('div', { class: 'field' },
         el('div', { class: 'row' },
@@ -1891,7 +1923,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {
