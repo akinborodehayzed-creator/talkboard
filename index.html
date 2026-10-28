@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Talk Board</title>
+<meta name="description" content="A picture-based talking app (AAC) for children who are not speaking yet.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Talk Board">
+<meta name="theme-color" content="#1F8A9C">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root {
+    --bg: #EEF1F5;
+    --panel: #FFFFFF;
+    --ink: #1D2430;
+    --muted: #5E6B7D;
+    --line: #D5DBE4;
+    --accent: #1F8A9C;
+    --accent-ink: #FFFFFF;
+    --danger: #D64545;
+    --gap: 8px;
+    --radius: 16px;
+    --label-size: 20px;
+
+    /* Fitzgerald-style word colours used by most AAC systems */
+    --c-people: #FFE27A;
+    --c-action: #9BE09B;
+    --c-describe: #A3CDFF;
+    --c-thing: #FFC48A;
+    --c-social: #FFB3D1;
+    --c-question: #D5BCFF;
+    --c-no: #FF9E9E;
+    --c-little: #FFFFFF;
+    --c-folder: #EADFCB;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  button { font: inherit; color: inherit; touch-action: manipulation; cursor: pointer; }
+  input, select, textarea { font: inherit; -webkit-user-select: text; user-select: text; }
+
+  /* ---------- Top: message bar ---------- */
+  #top { display: flex; gap: var(--gap); padding: 10px 10px 0; align-items: stretch; }
+  .navbtn, .barbtn {
+    border: 0; border-radius: var(--radius); background: var(--panel);
+    min-width: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; font-size: 15px; font-weight: 600; box-shadow: 0 1px 0 var(--line), 0 2px 6px rgba(0,0,0,.05);
+  }
+  .navbtn .ico, .barbtn .ico { font-size: 30px; line-height: 1; }
+  .navbtn:disabled { opacity: .35; }
+  #speakBtn { background: var(--accent); color: var(--accent-ink); min-width: 110px; }
+  #message {
+    flex: 1; min-height: 96px; background: var(--panel); border-radius: var(--radius);
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden;
+    border: 3px solid transparent; box-shadow: 0 1px 0 var(--line), 0 2px 6px rgba(0,0,0,.05);
+    scrollbar-width: none;
+  }
+  #message::-webkit-scrollbar { display: none; }
+  #message.speaking { border-color: var(--accent); }
+  #message .hint { color: var(--muted); font-size: 18px; white-space: nowrap; }
+  .chip {
+    flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 64px; height: 76px; padding: 4px 8px; border-radius: 12px; background: var(--c-little);
+    border: 2px solid rgba(0,0,0,.08);
+  }
+  .chip .sym { font-size: 34px; line-height: 1.05; }
+  .chip img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }
+  .chip .lbl { font-size: 15px; font-weight: 600; white-space: nowrap; }
+
+  /* ---------- Second row: quick phrases ---------- */
+  #row2 { display: flex; gap: var(--gap); padding: 8px 10px; align-items: center; min-height: 64px; }
+  #where {
+    flex: 0 0 auto; font-weight: 700; font-size: 18px; padding: 0 12px; height: 48px; border-radius: 12px;
+    display: flex; align-items: center; gap: 6px; background: var(--c-folder);
+  }
+  #phrases { flex: 1; display: flex; gap: var(--gap); overflow-x: auto; scrollbar-width: none; }
+  #phrases::-webkit-scrollbar { display: none; }
+  .phrase {
+    flex: 0 0 auto; height: 48px; padding: 0 16px; border: 0; border-radius: 24px; background: var(--panel);
+    font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 1px 0 var(--line);
+  }
+  .phrase .sym { font-size: 24px; }
+  .phrase img { width: 30px; height: 30px; border-radius: 6px; object-fit: cover; }
+  .phrase.add { border: 2px dashed var(--line); background: transparent; color: var(--muted); }
+  .tool {
+    flex: 0 0 auto; height: 48px; min-width: 48px; padding: 0 12px; border: 0; border-radius: 12px;
+    background: var(--panel); font-size: 22px; box-shadow: 0 1px 0 var(--line); position: relative; overflow: hidden;
+  }
+  #gearBtn .fill {
+    position: absolute; left: 0; bottom: 0; height: 100%; width: 0; background: rgba(31,138,156,.35);
+    pointer-events: none;
+  }
+  #gearBtn.holding .fill { width: 100%; transition: width 1.5s linear; }
+  #editBanner {
+    display: none; align-items: center; gap: 12px; background: #FFF4CC; border-radius: 12px;
+    padding: 0 12px; height: 52px; font-weight: 600; margin: 0 10px 8px;
+  }
+  body.editing #editBanner { display: flex; }
+  #phrasesWrap { flex: 1; display: flex; min-width: 0; }
+  body.no-phrases #phrasesWrap { visibility: hidden; }
+  body.editing.no-phrases #phrasesWrap { visibility: visible; }
+  #doneEdit { margin-left: auto; background: var(--accent); color: #fff; border: 0; border-radius: 10px; height: 36px; padding: 0 16px; font-weight: 700; }
+
+  /* ---------- Board ---------- */
+  #board { flex: 1; overflow-y: auto; padding: 0 10px 10px; -webkit-overflow-scrolling: touch; }
+  #grid { display: grid; gap: var(--gap); min-height: 100%; }
+  .tile {
+    position: relative; border: 0; border-radius: var(--radius); padding: 6px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    background: var(--c-little); border: 2px solid rgba(0,0,0,.10);
+    box-shadow: 0 2px 0 rgba(0,0,0,.10);
+    container-type: size; min-height: 0; overflow: hidden;
+    transition: transform .08s ease;
+  }
+  .tile:active, .tile.pressed { transform: scale(.94); }
+  .tile.flash { outline: 4px solid var(--accent); outline-offset: -4px; }
+  .tile .sym { font-size: 2.6rem; font-size: min(52cqh, 60cqw); line-height: 1.05; }
+  .tile img { width: auto; height: 62%; max-width: 90%; object-fit: cover; border-radius: 10px; }
+  .tile .lbl {
+    font-size: var(--label-size); font-size: min(var(--label-size), 16cqw); font-weight: 700; line-height: 1.1; text-align: center;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px;
+  }
+  body.labels-top .tile { flex-direction: column-reverse; }
+  body.no-labels .tile .lbl { display: none; }
+  body.no-labels .tile .sym { font-size: min(70cqh, 70cqw); }
+  body.no-labels .tile img { height: 85%; }
+  .tile.folder { background: var(--c-folder); border-top-left-radius: 4px; }
+  .tile.folder::before {
+    content: ""; position: absolute; top: -2px; left: -2px; width: 42%; height: 12px;
+    background: rgba(0,0,0,.12); border-bottom-right-radius: 10px;
+  }
+  .tile.folder .corner { position: absolute; right: 8px; top: 6px; font-size: 16px; opacity: .55; }
+  .tile.ghost { visibility: hidden; }
+  body.editing .tile.ghost { visibility: visible; opacity: .35; border-style: dashed; }
+  body.editing .tile:not(.add) { animation: wiggle .5s ease-in-out infinite alternate; }
+  @keyframes wiggle { from { transform: rotate(-.6deg); } to { transform: rotate(.6deg); } }
+  .tile.add { background: transparent; border: 3px dashed var(--line); color: var(--muted); box-shadow: none; }
+  .tile.add .sym { font-size: min(40cqh, 50cqw); }
+
+  .c-people { background: var(--c-people); }
+  .c-action { background: var(--c-action); }
+  .c-describe { background: var(--c-describe); }
+  .c-thing { background: var(--c-thing); }
+  .c-social { background: var(--c-social); }
+  .c-question { background: var(--c-question); }
+  .c-no { background: var(--c-no); }
+  .c-little { background: var(--c-little); }
+  .c-folder { background: var(--c-folder); }
+
+  /* ---------- Modals ---------- */
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(20,28,40,.45); display: none; align-items: center; justify-content: center;
+    z-index: 20; padding: 20px;
+  }
+  .modal-back.open { display: flex; }
+  .modal {
+    background: var(--panel); border-radius: 22px; width: min(760px, 100%); max-height: 100%;
+    display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  }
+  .modal header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .modal header h2 { margin: 0; font-size: 22px; flex: 1; }
+  .modal .body { padding: 16px 20px 24px; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+  .modal footer { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); }
+  .btn {
+    border: 0; border-radius: 12px; padding: 12px 18px; font-weight: 700; font-size: 17px; background: #E7ECF2;
+  }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.danger { background: #FDE3E3; color: var(--danger); }
+  .btn.small { padding: 8px 12px; font-size: 15px; }
+  .tabs { display: flex; gap: 6px; padding: 10px 20px 0; flex-wrap: wrap; }
+  .tabs button { border: 0; border-radius: 10px; padding: 10px 14px; background: #E7ECF2; font-weight: 600; font-size: 16px; }
+  .tabs button.on { background: var(--accent); color: #fff; }
+  .field { margin: 0 0 16px; }
+  .field > label, .field > .flabel { display: block; font-weight: 700; margin-bottom: 6px; }
+  .field .help { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .field input[type=text], .field select {
+    width: 100%; font-size: 18px; padding: 12px; border-radius: 12px; border: 2px solid var(--line); background: #fff;
+  }
+  .field input[type=range] { width: 100%; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #EEF1F5; }
+  .switch span { font-weight: 600; }
+  .switch small { display: block; color: var(--muted); font-weight: 400; }
+  .switch input { width: 28px; height: 28px; accent-color: var(--accent); flex: 0 0 auto; }
+  .colors { display: flex; gap: 8px; flex-wrap: wrap; }
+  .colors button { border: 3px solid transparent; border-radius: 12px; padding: 8px 12px; font-size: 15px; font-weight: 600; }
+  .colors button.on { border-color: var(--ink); }
+  .preview-tile { width: 140px; height: 120px; pointer-events: none; animation: none !important; }
+  .history { list-style: none; padding: 0; margin: 0; }
+  .history li { padding: 10px 0; border-bottom: 1px solid #EEF1F5; }
+  .history time { color: var(--muted); font-size: 13px; display: block; }
+  .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin: 8px 0 16px; }
+  .legend div { padding: 8px 12px; border-radius: 10px; font-weight: 600; border: 1px solid rgba(0,0,0,.08); }
+  .help-text h3 { margin: 18px 0 6px; }
+  .help-text p, .help-text li { line-height: 1.45; }
+
+  /* Big "show" screen so a listener can read the sentence in a noisy room */
+  #show {
+    position: fixed; inset: 0; background: #fff; z-index: 30; display: none; align-items: center; justify-content: center;
+    padding: 40px; text-align: center; font-size: clamp(40px, 8vw, 110px); font-weight: 800; line-height: 1.15;
+  }
+  #show.open { display: flex; }
+  #show small { position: absolute; bottom: 24px; left: 0; right: 0; font-size: 18px; font-weight: 500; color: var(--muted); }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: #1D2430; color: #fff; padding: 12px 20px; border-radius: 14px; font-weight: 600; z-index: 40;
+    transition: all .25s ease; pointer-events: none; max-width: 90vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 700px) {
+    .navbtn, .barbtn { min-width: 58px; font-size: 12px; }
+    #speakBtn { min-width: 70px; }
+    #message { min-height: 80px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="top">
+  <button class="navbtn" id="homeBtn" aria-label="Home"><span class="ico">🏠</span>Home</button>
+  <button class="navbtn" id="backBtn" aria-label="Back"><span class="ico">⬅️</span>Back</button>
+  <div id="message" role="button" aria-label="Message. Tap to speak."></div>
+  <button class="barbtn" id="speakBtn" aria-label="Speak"><span class="ico">🔊</span>Speak</button>
+  <button class="barbtn" id="delBtn" aria-label="Delete last word"><span class="ico">⌫</span>Delete</button>
+  <button class="barbtn" id="clearBtn" aria-label="Clear"><span class="ico">🧹</span>Clear</button>
+</div>
+
+<div id="row2">
+  <div id="where"></div>
+  <div id="phrasesWrap"><div id="phrases"></div></div>
+  <button class="tool" id="showBtn" aria-label="Show message in big letters">🔍</button>
+  <button class="tool" id="gearBtn" aria-label="Grown-up settings (hold)"><span class="fill"></span>⚙️</button>
+</div>
+
+<div id="editBanner">✏️ Editing — tap any button or phrase to change it, or tap ➕ to add one. <button id="doneEdit">Done</button></div>
+<div id="board"><div id="grid"></div></div>
+
+<!-- Settings -->
+<div class="modal-back" id="settingsModal">
+  <div class="modal">
+    <header><h2>Grown-up settings</h2><button class="btn" data-close>Close</button></header>
+    <div class="tabs" id="settingsTabs"></div>
+    <div class="body" id="settingsBody"></div>
+  </div>
+</div>
+
+<!-- Button editor -->
+<div class="modal-back" id="editorModal">
+  <div class="modal">
+    <header><h2 id="editorTitle">Edit button</h2></header>
+    <div class="body" id="editorBody"></div>
+    <footer id="editorFoot"></footer>
+  </div>
+</div>
+
+<div id="show"><div id="showText"></div><small>Tap anywhere to close</small></div>
+<div id="toast"></div>
+<input type="file" id="photoInput" accept="image/*" hidden>
+<input type="file" id="importInput" accept="application/json,.json" hidden>
+
+<script>
+(() => {
+'use strict';
+
+/* =========================================================
+   Default vocabulary
+   Core words stay in fixed places on the Home board so the
+   child can learn them by position (motor planning).
+   ========================================================= */
+const COLORS = {
+  people:   'People & pronouns',
+  action:   'Actions / verbs',
+  describe: 'Describing words',
+  thing:    'Things / nouns',
+  social:   'Social words',
+  question: 'Questions',
+  no:       'Stop / no / not',
+  little:   'Little words',
+  folder:   'Folder'
+};
+
+const w = (label, emoji, color, speak) => ({ type: 'word', label, emoji, color, ...(speak ? { speak } : {}) });
+const f = (label, emoji, target) => ({ type: 'folder', label, emoji, color: 'folder', target });
+const many = (color, list) => list.map(([label, emoji, speak]) => w(label, emoji, color, speak));
+
+function defaultState() {
+  const home = [
+    w('I', '🙋', 'people'), w('want', '🤲', 'action'), w('more', '➕', 'little'), w('stop', '✋', 'no'),
+    w('go', '🏃', 'action'), w('help', '🆘', 'action'), w('yes', '👍', 'social'), w('no', '👎', 'no'),
+
+    w('you', '👉', 'people'), w('like', '❤️', 'action'), w('eat', '🍽️', 'action'), w('drink', '🥤', 'action'),
+    w('play', '🧸', 'action'), w('open', '🔓', 'action'), w('all done', '🙌', 'social'), w('not', '🚫', 'no'),
+
+    w('me', '🧒', 'people'), w('need', '☝️', 'action'), w('look', '👀', 'action'), w('feel', '💭', 'action'),
+    w('have', '🫴', 'action'), w('do', '🛠️', 'action'), w('put', '📥', 'action'), w('get', '🫳', 'action'),
+
+    w('it', '📦', 'little'), w('that', '👆', 'little'), w('big', '🐘', 'describe'), w('little', '🐭', 'describe'),
+    w('good', '😀', 'describe'), w('bad', '😖', 'describe'), w('hot', '🔥', 'describe'), w('cold', '🧊', 'describe'),
+
+    w('what', '❓', 'question'), w('where', '🗺️', 'question'), w('who', '👤', 'question'), w('mum', '👩', 'people'),
+    w('dad', '👨', 'people'), w('here', '📍', 'little'), w('up', '⬆️', 'little'), w('down', '⬇️', 'little'),
+
+    f('Food', '🍎', 'food'), f('Drinks', '🧃', 'drinks'), f('Feelings', '😊', 'feelings'), f('Play', '🎈', 'play'),
+    f('Body', '🤕', 'body'), f('Places', '🏠', 'places'), f('People', '👨‍👩‍👧', 'people'), f('Animals', '🐶', 'animals'),
+
+    f('Clothes', '👕', 'clothes'), f('Colours', '🌈', 'colours'), f('Chat', '👋', 'chat'), f('Time', '⏰', 'time'),
+    f('Routines', '🪥', 'routines'), f('Numbers', '🔢', 'numbers'), f('Describe', '✨', 'describe'), f('My Things', '⭐', 'mythings')
+  ];
+
+  const boards = {
+    home: { name: 'Home', buttons: home },
+    food: { name: 'Food', buttons: many('thing', [
+      ['apple','🍎'],['banana','🍌'],['grapes','🍇'],['strawberry','🍓'],['orange','🍊'],['watermelon','🍉'],['carrot','🥕'],['broccoli','🥦'],
+      ['bread','🍞'],['toast','🍞'],['cheese','🧀'],['egg','🥚'],['chicken','🍗'],['rice','🍚'],['pasta','🍝'],['pizza','🍕'],
+      ['sandwich','🥪'],['chips','🍟'],['burger','🍔'],['hot dog','🌭'],['soup','🍲'],['cereal','🥣'],['yoghurt','🥛'],['popcorn','🍿'],
+      ['crackers','🥨'],['biscuit','🍪'],['cake','🍰'],['ice cream','🍦'],['sweets','🍬'],['chocolate','🍫'],['snack','🥨'],['yummy','😋']
+    ]).map(b => b.label === 'yummy' ? { ...b, color: 'describe' } : b) },
+    drinks: { name: 'Drinks', buttons: many('thing', [
+      ['water','💧'],['milk','🥛'],['juice','🧃'],['smoothie','🥤'],['hot chocolate','☕'],['tea','🍵'],['cup','🥤'],['bottle','🍼'],
+      ['straw','🥤'],['ice','🧊'],['thirsty','😛'],['more drink','➕','more drink, please']
+    ]) },
+    feelings: { name: 'Feelings', buttons: many('describe', [
+      ['happy','😀'],['sad','😢'],['angry','😠'],['scared','😨'],['tired','😴'],['sick','🤒'],['hurt','🤕'],['excited','🤩'],
+      ['silly','🤪'],['calm','😌'],['bored','😑'],['frustrated','😤'],['worried','😟'],['shy','😳'],['surprised','😮'],['loved','🥰'],
+      ['hungry','😋'],['thirsty','😛'],['too loud','🙉','it is too loud'],['need a hug','🤗','I need a hug'],
+      ['need quiet','🤫','I need some quiet'],['feel better','😊','I feel better'],['okay','👌'],['not okay','🙁','I am not okay']
+    ]) },
+    play: { name: 'Play', buttons: many('thing', [
+      ['ball','⚽'],['blocks','🧱'],['puzzle','🧩'],['car','🚗'],['train','🚂'],['doll','🪆'],['teddy','🧸'],['bubbles','🫧'],
+      ['music','🎵'],['drawing','🖍️'],['book','📖'],['tablet','📱'],['TV','📺'],['slide','🛝'],['swing','🌳'],['bike','🚲'],
+      ['outside','🌳'],['game','🎲'],['dance','💃'],['sing','🎤'],['hide and seek','🙈'],['tickle','🤭'],['chase','🏃'],['balloon','🎈']
+    ]) },
+    body: { name: 'Body', buttons: [
+      ...many('thing', [
+        ['head','🙆'],['eyes','👀'],['ears','👂'],['nose','👃'],['mouth','👄'],['teeth','🦷'],['tummy','🫄'],['hand','✋'],
+        ['arm','💪'],['leg','🦵'],['foot','🦶'],['back','🧍']
+      ]),
+      ...many('describe', [['hurts','🤕','it hurts'],['itchy','🦟'],['sick','🤒'],['feel funny','😵‍💫','I feel funny']]),
+      ...many('thing', [['plaster','🩹'],['medicine','💊'],['doctor','🩺'],['tissue','🤧']])
+    ] },
+    places: { name: 'Places', buttons: many('thing', [
+      ['home','🏠'],['school','🏫'],['park','🏞️'],['playground','🛝'],['shop','🛒'],['car','🚗'],['bedroom','🛏️'],['bathroom','🚽'],
+      ['kitchen','🍳'],['outside','🌳'],['garden','🌻'],['beach','🏖️'],['swimming','🏊'],['grandma\'s house','👵'],['hospital','🏥'],['restaurant','🍽️'],
+      ['library','📚'],['bus','🚌']
+    ]) },
+    people: { name: 'People', buttons: many('people', [
+      ['mum','👩'],['dad','👨'],['brother','👦'],['sister','👧'],['baby','👶'],['grandma','👵'],['grandpa','👴'],['teacher','🧑‍🏫'],
+      ['friend','🧒'],['doctor','🧑‍⚕️'],['family','👨‍👩‍👧'],['everyone','👥'],['he','👦'],['she','👧'],['we','🫂'],['they','👥']
+    ]) },
+    animals: { name: 'Animals', buttons: many('thing', [
+      ['dog','🐶'],['cat','🐱'],['fish','🐟'],['bird','🐦'],['horse','🐴'],['cow','🐮'],['pig','🐷'],['duck','🦆'],
+      ['rabbit','🐰'],['lion','🦁'],['elephant','🐘'],['monkey','🐵'],['bear','🐻'],['frog','🐸'],['dinosaur','🦖'],['butterfly','🦋']
+    ]) },
+    clothes: { name: 'Clothes', buttons: many('thing', [
+      ['shirt','👕'],['trousers','👖'],['shorts','🩳'],['dress','👗'],['jumper','🧶'],['coat','🧥'],['hat','🧢'],['shoes','👟'],
+      ['socks','🧦'],['gloves','🧤'],['pyjamas','🌙'],['swimsuit','🩱'],['on','🔛'],['off','📴'],['too hot','🥵','I am too hot'],['too cold','🥶','I am too cold']
+    ]) },
+    colours: { name: 'Colours', buttons: many('describe', [
+      ['red','🟥'],['orange','🟧'],['yellow','🟨'],['green','🟩'],['blue','🟦'],['purple','🟪'],['pink','🌸'],['brown','🟫'],
+      ['black','⬛'],['white','⬜'],['rainbow','🌈'],['colour','🎨']
+    ]) },
+    chat: { name: 'Chat', buttons: many('social', [
+      ['hello','👋'],['goodbye','👋'],['please','🙏'],['thank you','😊'],['sorry','😔'],['excuse me','🙋'],['I love you','🥰'],['hug','🤗'],
+      ['high five','✋'],['my turn','☝️'],['your turn','👉'],['wait','⏳'],['okay','👌'],['great job','🌟'],['no thank you','🙅'],['yes please','✅'],
+      ['how are you?','💬'],['I\'m fine','🙂','I am fine'],['funny','😂'],['again','🔁']
+    ]) },
+    time: { name: 'Time', buttons: many('little', [
+      ['now','⏰'],['later','⏳'],['soon','⌛'],['today','📅'],['tomorrow','🌅'],['yesterday','🌙'],['morning','🌄'],['night','🌃'],
+      ['first','1️⃣'],['then','2️⃣'],['again','🔁'],['finished','🏁'],['wait','✋'],['one more minute','⏱️','one more minute'],['weekend','🎉'],['birthday','🎂']
+    ]) },
+    routines: { name: 'Routines', buttons: many('action', [
+      ['toilet','🚽','I need the toilet'],['wash hands','🧼'],['bath','🛁'],['shower','🚿'],['brush teeth','🪥'],['get dressed','👕'],['sleep','😴'],['bed','🛏️'],
+      ['nap','💤'],['breakfast','🥞'],['lunch','🥪'],['dinner','🍝'],['snack','🍪'],['medicine','💊'],['car ride','🚗'],['haircut','💇']
+    ]) },
+    numbers: { name: 'Numbers', buttons: many('describe', [
+      ['one','1️⃣'],['two','2️⃣'],['three','3️⃣'],['four','4️⃣'],['five','5️⃣'],['six','6️⃣'],['seven','7️⃣'],['eight','8️⃣'],
+      ['nine','9️⃣'],['ten','🔟'],['some','🤏'],['all','💯'],['a lot','📚'],['none','0️⃣']
+    ]) },
+    describe: { name: 'Describe', buttons: many('describe', [
+      ['fast','⚡'],['slow','🐢'],['wet','💦'],['dry','☀️'],['loud','📢'],['quiet','🤫'],['soft','🪶'],['hard','🪨'],
+      ['clean','🧼'],['dirty','💩'],['yummy','😋'],['yucky','🤢'],['new','✨'],['old','🕰️'],['same','🟰'],['different','🔀'],
+      ['broken','💔'],['fun','🥳'],['scary','👻'],['pretty','🌺']
+    ]) },
+    mythings: { name: 'My Things', buttons: [] }
+  };
+
+  return {
+    version: 1,
+    settings: {
+      cols: 8,
+      labelPos: 'bottom',
+      showLabels: true,
+      labelSize: 20,
+      speakOnTap: true,
+      speakFolders: false,
+      clearAfterSpeak: false,
+      goHomeAfterFolder: true,
+      tapGuard: 300,
+      showPhrases: true,
+      voiceURI: '',
+      rate: 0.9,
+      pitch: 1.1,
+      volume: 1
+    },
+    phrases: [
+      { label: 'I need help', emoji: '🆘' },
+      { label: 'I need a break', emoji: '✋' },
+      { label: 'All done', emoji: '🙌' },
+      { label: 'I need the toilet', emoji: '🚽' },
+      { label: 'Something hurts', emoji: '🤕' },
+      { label: 'I am hungry', emoji: '😋' },
+      { label: 'I am thirsty', emoji: '💧' },
+      { label: 'I love you', emoji: '🥰' }
+    ],
+    boards,
+    history: []
+  };
+}
+
+/* =========================================================
+   Saving (everything stays on this iPad)
+   ========================================================= */
+const STORE_KEY = 'talkboard-v1';
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !data.boards || !data.boards.home) return null;
+    const def = defaultState();
+    data.settings = { ...def.settings, ...(data.settings || {}) };
+    data.phrases = data.phrases || def.phrases;
+    data.history = data.history || [];
+    return data;
+  } catch (e) { return null; }
+}
+
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    return true;
+  } catch (e) {
+    toast('Could not save. The iPad storage for this app is full — try using fewer or smaller photos.');
+    return false;
+  }
+}
+
+let state = load() || defaultState();
+let nav = ['home'];
+let message = [];
+let editing = false;
+let lastTap = 0;
+
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+const $ = s => document.querySelector(s);
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (k === 'text') n.textContent = v;
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return n;
+}
+function symbolNode(item) {
+  if (item.image) return el('img', { src: item.image, alt: '' });
+  return el('span', { class: 'sym', text: item.emoji || '' });
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+function currentBoardId() { return nav[nav.length - 1]; }
+function newId(base) {
+  let id = (base || 'board').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'board';
+  let n = id, i = 2;
+  while (state.boards[n]) n = id + '-' + i++;
+  return n;
+}
+
+/* =========================================================
+   Speech
+   ========================================================= */
+let voices = [];
+function loadVoices() {
+  if (!('speechSynthesis' in window)) return;
+  voices = speechSynthesis.getVoices();
+}
+if ('speechSynthesis' in window) {
+  loadVoices();
+  speechSynthesis.addEventListener ? speechSynthesis.addEventListener('voiceschanged', loadVoices) : (speechSynthesis.onvoiceschanged = loadVoices);
+}
+
+function say(text, onEnd) {
+  if (!text) return;
+  if (!('speechSynthesis' in window)) { toast(text); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const s = state.settings;
+  const v = voices.find(v => v.voiceURI === s.voiceURI);
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = s.rate; u.pitch = s.pitch; u.volume = s.volume;
+  if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
+  speechSynthesis.speak(u);
+}
+
+function spokenText(item) { return item.speak || item.label; }
+
+/* =========================================================
+   Rendering
+   ========================================================= */
+function applySettings() {
+  const s = state.settings;
+  document.body.classList.toggle('labels-top', s.labelPos === 'top');
+  document.body.classList.toggle('no-labels', !s.showLabels);
+  document.body.classList.toggle('no-phrases', !s.showPhrases);
+  document.body.classList.toggle('editing', editing);
+  document.documentElement.style.setProperty('--label-size', s.labelSize + 'px');
+}
+
+function renderMessage() {
+  const m = $('#message');
+  m.replaceChildren();
+  if (!message.length) {
+    m.append(el('span', { class: 'hint', text: editing ? 'Editing mode' : 'Tap pictures to build a message…' }));
+    return;
+  }
+  for (const item of message) {
+    m.append(el('div', { class: 'chip c-' + (item.color || 'little') }, symbolNode(item), el('span', { class: 'lbl', text: item.label })));
+  }
+  m.scrollLeft = m.scrollWidth;
+}
+
+function renderRow2() {
+  const id = currentBoardId();
+  const b = state.boards[id];
+  $('#where').replaceChildren(id === 'home' ? '🏠 Home' : '📂 ' + (b ? b.name : ''));
+  $('#backBtn').disabled = nav.length <= 1;
+  $('#homeBtn').disabled = id === 'home';
+
+  const p = $('#phrases');
+  p.replaceChildren();
+  state.phrases.forEach((ph, i) => {
+    p.append(el('button', { class: 'phrase', 'data-i': i }, symbolNode(ph), el('span', { text: ph.label })));
+  });
+  if (editing) p.append(el('button', { class: 'phrase add', onclick: () => openEditor({ kind: 'phrase', index: -1 }) }, '➕ Add phrase'));
+}
+
+function boardRows(count) {
+  const cols = state.settings.cols;
+  const homeCount = state.boards.home.buttons.length;
+  return Math.max(Math.ceil(count / cols), Math.ceil(homeCount / cols), 1);
+}
+
+function renderBoard() {
+  const id = currentBoardId();
+  const b = state.boards[id];
+  const grid = $('#grid');
+  grid.replaceChildren();
+  if (!b) { nav = ['home']; return renderAll(); }
+
+  const cols = state.settings.cols;
+  const count = b.buttons.length + (editing ? 1 : 0);
+  const rows = boardRows(count);
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(84px, 1fr))`;
+
+  b.buttons.forEach((item, i) => {
+    const cls = ['tile', 'c-' + (item.color || 'little')];
+    if (item.type === 'folder') cls.push('folder');
+    if (item.hidden) cls.push('ghost');
+    grid.append(el('button', { class: cls.join(' '), 'data-i': i, 'aria-label': item.label },
+      symbolNode(item),
+      el('span', { class: 'lbl', text: item.label }),
+      item.type === 'folder' ? el('span', { class: 'corner', text: '▸' }) : null
+    ));
+  });
+
+  if (editing) {
+    grid.append(el('button', { class: 'tile add', 'data-add': '1', 'aria-label': 'Add a button' },
+      el('span', { class: 'sym', text: '➕' }), el('span', { class: 'lbl', text: 'Add' })));
+  } else if (!b.buttons.length) {
+    grid.append(el('div', { style: `grid-column: 1 / -1; align-self: center; text-align:center; color: var(--muted); font-size: 20px;` },
+      'This folder is empty. A grown-up can add photos here: hold ⚙️ → Edit buttons.'));
+  }
+}
+
+function renderAll() {
+  applySettings();
+  renderMessage();
+  renderRow2();
+  renderBoard();
+}
+
+/* =========================================================
+   Child actions
+   ========================================================= */
+function guard() {
+  const now = Date.now();
+  if (now - lastTap < state.settings.tapGuard) return false;
+  lastTap = now;
+  return true;
+}
+
+function flash(node) {
+  if (!node) return;
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 350);
+}
+
+function openBoard(id) {
+  if (!state.boards[id]) return;
+  nav.push(id);
+  renderRow2();
+  renderBoard();
+  $('#board').scrollTop = 0;
+}
+
+function goHome() { nav = ['home']; renderRow2(); renderBoard(); }
+
+function pressTile(i, node) {
+  const id = currentBoardId();
+  const item = state.boards[id].buttons[i];
+  if (!item) return;
+  if (editing) return openEditor({ kind: 'button', boardId: id, index: i });
+  if (item.hidden) return;
+  if (!guard()) return;
+  flash(node);
+
+  if (item.type === 'folder') {
+    if (state.settings.speakFolders) say(item.label);
+    return openBoard(item.target);
+  }
+
+  message.push({ label: item.label, speak: item.speak, emoji: item.emoji, image: item.image, color: item.color });
+  renderMessage();
+  if (state.settings.speakOnTap) say(spokenText(item));
+  if (id !== 'home' && state.settings.goHomeAfterFolder) setTimeout(goHome, 150);
+}
+
+function speakMessage() {
+  if (!message.length) return;
+  const text = message.map(spokenText).join(' ');
+  const bar = $('#message');
+  bar.classList.add('speaking');
+  say(text, () => bar.classList.remove('speaking'));
+  setTimeout(() => bar.classList.remove('speaking'), Math.max(1500, text.length * 90));
+  logHistory(text);
+  if (state.settings.clearAfterSpeak) { message = []; setTimeout(renderMessage, 600); }
+}
+
+function logHistory(text) {
+  state.history.unshift({ t: Date.now(), text });
+  state.history = state.history.slice(0, 200);
+  save();
+}
+
+$('#grid').addEventListener('click', e => {
+  const t = e.target.closest('.tile');
+  if (!t) return;
+  if (t.dataset.add) return openEditor({ kind: 'button', boardId: currentBoardId(), index: -1 });
+  pressTile(+t.dataset.i, t);
+});
+
+$('#phrases').addEventListener('click', e => {
+  const t = e.target.closest('.phrase');
+  if (!t) return;
+  const ph = state.phrases[+t.dataset.i];
+  if (editing) return openEditor({ kind: 'phrase', index: +t.dataset.i });
+  if (!guard()) return;
+  flash(t);
+  say(ph.speak || ph.label);
+  logHistory(ph.speak || ph.label);
+});
+
+$('#message').addEventListener('click', speakMessage);
+$('#speakBtn').addEventListener('click', speakMessage);
+$('#delBtn').addEventListener('click', () => { message.pop(); renderMessage(); });
+$('#clearBtn').addEventListener('click', () => { message = []; renderMessage(); if ('speechSynthesis' in window) speechSynthesis.cancel(); });
+$('#homeBtn').addEventListener('click', goHome);
+$('#backBtn').addEventListener('click', () => { if (nav.length > 1) { nav.pop(); renderRow2(); renderBoard(); } });
+
+$('#showBtn').addEventListener('click', () => {
+  const text = message.map(m => m.label).join(' ');
+  if (!text) return toast('Build a message first, then tap 🔍 to show it big.');
+  $('#showText').textContent = text;
+  $('#show').classList.add('open');
+});
+$('#show').addEventListener('click', () => $('#show').classList.remove('open'));
+
+/* Grown-up lock: hold the gear for 1.5 seconds */
+(() => {
+  const g = $('#gearBtn');
+  let timer = null;
+  const start = e => {
+    e.preventDefault();
+    g.classList.add('holding');
+    timer = setTimeout(() => { cancel(); openSettings(); }, 1500);
+  };
+  const cancel = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    g.classList.remove('holding');
+  };
+  g.addEventListener('pointerdown', start);
+  g.addEventListener('pointerup', () => { if (timer) toast('Grown-ups: press and hold ⚙️ to open settings.'); cancel(); });
+  g.addEventListener('pointerleave', cancel);
+  g.addEventListener('pointercancel', cancel);
+  g.addEventListener('contextmenu', e => e.preventDefault());
+})();
+
+$('#doneEdit').addEventListener('click', () => setEditing(false));
+
+function setEditing(on) {
+  editing = on;
+  renderAll();
+  if (on) toast('Editing on. Tap any button to change it.');
+}
+
+/* =========================================================
+   Settings
+   ========================================================= */
+let settingsTab = 'voice';
+const TABS = [
+  ['voice', '🗣️ Voice'],
+  ['speaking', '💬 Speaking'],
+  ['display', '🖼️ Display'],
+  ['edit', '✏️ Edit'],
+  ['history', '🕘 What was said'],
+  ['backup', '💾 Backup'],
+  ['help', '❓ Help']
+];
+
+function openSettings() {
+  loadVoices();
+  renderSettings();
+  $('#settingsModal').classList.add('open');
+}
+function closeModal(id) { $(id).classList.remove('open'); }
+$('#settingsModal [data-close]').addEventListener('click', () => closeModal('#settingsModal'));
+
+function setSetting(key, value) {
+  state.settings[key] = value;
+  save();
+  renderAll();
+}
+
+function toggleRow(key, title, sub) {
+  return el('label', { class: 'switch' },
+    el('span', {}, title, sub ? el('small', { text: sub }) : null),
+    el('input', { type: 'checkbox', checked: !!state.settings[key], onchange: e => setSetting(key, e.target.checked) }));
+}
+
+function rangeField(key, title, min, max, step, fmt) {
+  const out = el('span', { text: fmt(state.settings[key]) });
+  return el('div', { class: 'field' },
+    el('div', { class: 'flabel' }, title, ': ', out),
+    el('input', { type: 'range', min, max, step, value: state.settings[key],
+      oninput: e => { out.textContent = fmt(+e.target.value); state.settings[key] = +e.target.value; },
+      onchange: () => { save(); renderAll(); } }));
+}
+
+function renderSettings() {
+  const tabs = $('#settingsTabs');
+  tabs.replaceChildren(...TABS.map(([id, name]) =>
+    el('button', { class: id === settingsTab ? 'on' : '', onclick: () => { settingsTab = id; renderSettings(); } }, name)));
+  const body = $('#settingsBody');
+  body.replaceChildren();
+  const s = state.settings;
+
+  if (settingsTab === 'voice') {
+    const sorted = voices.slice().sort((a, b) => {
+      const pref = navigator.language.slice(0, 2);
+      const pa = a.lang.startsWith(pref) ? 0 : 1, pb = b.lang.startsWith(pref) ? 0 : 1;
+      return pa - pb || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
+    });
+    const sel = el('select', { onchange: e => setSetting('voiceURI', e.target.value) },
+      el('option', { value: '', text: 'iPad default voice' }),
+      sorted.map(v => el('option', { value: v.voiceURI, selected: v.voiceURI === s.voiceURI, text: `${v.name} (${v.lang})` })));
+    body.append(
+      el('div', { class: 'field' }, el('label', { text: 'Voice' }), sel,
+        el('div', { class: 'help', text: 'Tip: choose a child or young-sounding voice if you can. You can download nicer voices on the iPad in Settings → Accessibility → Spoken Content → Voices.' })),
+      rangeField('rate', 'Speed', 0.5, 1.5, 0.05, v => v.toFixed(2) + '×'),
+      rangeField('pitch', 'Pitch', 0.5, 2, 0.05, v => v.toFixed(2)),
+      rangeField('volume', 'Volume', 0.2, 1, 0.05, v => Math.round(v * 100) + '%'),
+      el('button', { class: 'btn primary', onclick: () => say('Hello! I can talk with my pictures.') }, '▶️ Test the voice')
+    );
+  }
+
+  if (settingsTab === 'speaking') {
+    body.append(
+      toggleRow('speakOnTap', 'Say each word when tapped', 'Hearing the word straight away helps learning.'),
+      toggleRow('goHomeAfterFolder', 'Go back Home after picking from a folder', 'Makes it quicker to build “I want … apple”.'),
+      toggleRow('speakFolders', 'Say folder names when opened'),
+      toggleRow('clearAfterSpeak', 'Clear the message after speaking'),
+      toggleRow('showPhrases', 'Show quick phrases', 'The row of ready-made sentences under the message bar.'),
+      el('div', { class: 'field', style: 'margin-top:16px' },
+        el('label', { text: 'Ignore extra taps (for shaky or repeated tapping)' }),
+        el('select', { onchange: e => setSetting('tapGuard', +e.target.value) },
+          [[0, 'Off'], [300, 'Short (0.3 s)'], [600, 'Medium (0.6 s)'], [1000, 'Long (1 s)'], [1500, 'Extra long (1.5 s)']]
+            .map(([v, t]) => el('option', { value: v, selected: v === s.tapGuard, text: t }))))
+    );
+  }
+
+  if (settingsTab === 'display') {
+    body.append(
+      el('div', { class: 'field' }, el('label', { text: 'Buttons across' }),
+        el('select', { onchange: e => setSetting('cols', +e.target.value) },
+          [4, 5, 6, 7, 8, 9, 10].map(n => el('option', { value: n, selected: n === s.cols, text: n + ' across' }))),
+        el('div', { class: 'help', text: 'Fewer = bigger buttons. Try to pick one size and keep it, so buttons stay in the same place.' })),
+      el('div', { class: 'field' }, el('label', { text: 'Word size' }),
+        el('select', { onchange: e => setSetting('labelSize', +e.target.value) },
+          [[14, 'Small'], [17, 'Medium'], [20, 'Large'], [26, 'Extra large']].map(([v, t]) => el('option', { value: v, selected: v === s.labelSize, text: t })))),
+      el('div', { class: 'field' }, el('label', { text: 'Word position' }),
+        el('select', { onchange: e => setSetting('labelPos', e.target.value) },
+          [['bottom', 'Under the picture'], ['top', 'Above the picture']].map(([v, t]) => el('option', { value: v, selected: v === s.labelPos, text: t })))),
+      toggleRow('showLabels', 'Show words on buttons')
+    );
+  }
+
+  if (settingsTab === 'edit') {
+    body.append(
+      el('p', { text: 'Edit mode lets you change any button: its picture (emoji or your own photo), the word, what it says, its colour, or hide it for now. Hidden buttons keep their place, so you can reveal new words one at a time without moving anything.' }),
+      el('button', { class: 'btn primary', onclick: () => { closeModal('#settingsModal'); setEditing(true); } }, '✏️ Start editing buttons'),
+      el('p', { class: 'help', style: 'margin-top:16px', text: 'Tip: add photos of real people, food and toys in “My Things”. Real photos are often easiest to understand at first.' })
+    );
+  }
+
+  if (settingsTab === 'history') {
+    const list = el('ul', { class: 'history' });
+    if (!state.history.length) list.append(el('li', { text: 'Nothing has been spoken yet.' }));
+    for (const h of state.history) {
+      const d = new Date(h.t);
+      list.append(el('li', {}, el('time', { text: d.toLocaleString() }), h.text));
+    }
+    body.append(
+      el('p', { class: 'help', text: 'Messages that were spoken with the Speak button or quick phrases. Useful to share with a speech therapist.' }),
+      list,
+      el('div', { class: 'row', style: 'margin-top:16px' },
+        el('button', { class: 'btn danger', onclick: () => { if (confirm('Clear the history?')) { state.history = []; save(); renderSettings(); } } }, 'Clear history'))
+    );
+  }
+
+  if (settingsTab === 'backup') {
+    body.append(
+      el('p', { text: 'Everything (your buttons, photos and settings) is saved on this iPad only. Make a backup file now and then, so nothing is lost if the iPad is reset or replaced.' }),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn primary', onclick: exportBackup }, '⬇️ Save a backup file'),
+        el('button', { class: 'btn', onclick: () => $('#importInput').click() }, '⬆️ Load a backup file')),
+      el('hr', { style: 'margin:24px 0;border:0;border-top:1px solid var(--line)' }),
+      el('button', { class: 'btn danger', onclick: () => {
+        if (confirm('Reset everything to the starting buttons? Your own buttons and photos will be removed.')) {
+          state = defaultState(); nav = ['home']; message = []; save(); renderAll(); renderSettings(); toast('Reset done.');
+        } } }, 'Reset to starting buttons')
+    );
+  }
+
+  if (settingsTab === 'help') {
+    const legend = el('div', { class: 'legend' }, Object.entries(COLORS).map(([k, n]) => el('div', { class: 'c-' + k, text: n })));
+    body.append(el('div', { class: 'help-text' },
+      el('h3', { text: 'How the colours work' }),
+      el('p', { text: 'Words are coloured by type (a common AAC system called the Fitzgerald Key). It helps the child find words and build sentences: yellow who + green action + orange thing.' }),
+      legend,
+      el('h3', { text: 'Tips that help a child start using it' }),
+      el('ul', {},
+        el('li', { text: 'Model, model, model: when you talk, tap the words on the iPad too (“we GO outside”). Children learn AAC by seeing others use it, just like learning to talk.' }),
+        el('li', { text: 'Don’t make the child “say” something to earn things. Respond to every tap as real communication — even “no” and “stop”.' }),
+        el('li', { text: 'Keep the iPad with the child all day, charged and within reach.' }),
+        el('li', { text: 'Keep buttons in the same place. The child will learn where words live by position, like typing without looking.' }),
+        el('li', { text: 'Start with a few motivating words (more, stop, go, want, help, all done) and add more over time. Use “hide” in edit mode to keep things simple.' }),
+        el('li', { text: 'Talk to a speech and language therapist (SLT/SLP) — they can help choose words and set goals.' })),
+      el('h3', { text: 'Lock the iPad into this app (Guided Access)' }),
+      el('p', { text: 'iPad Settings → Accessibility → Guided Access → turn on and set a passcode. Open Talk Board, then triple-click the top (or Home) button to start. The child can’t leave the app until you triple-click and enter the passcode.' }),
+      el('h3', { text: 'No sound?' }),
+      el('p', { text: 'Check the iPad volume buttons, make sure Silent mode is off (swipe down from the top-right corner), and try another voice in the Voice tab.' })
+    ));
+  }
+}
+
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: `talkboard-backup-${new Date().toISOString().slice(0, 10)}.json` });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
+$('#importInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data.boards || !data.boards.home) throw new Error('bad');
+    if (!confirm('Replace everything on this iPad with this backup?')) return;
+    const def = defaultState();
+    data.settings = { ...def.settings, ...(data.settings || {}) };
+    data.phrases = data.phrases || def.phrases;
+    data.history = data.history || [];
+    state = data; nav = ['home']; message = [];
+    save(); renderAll(); renderSettings();
+    toast('Backup loaded.');
+  } catch (err) {
+    toast('That file is not a Talk Board backup.');
+  }
+});
+
+/* =========================================================
+   Button editor
+   ========================================================= */
+let draft = null;   // working copy of the button being edited
+let target = null;  // { kind: 'button'|'phrase', boardId, index }
+
+function openEditor(t) {
+  target = t;
+  if (t.kind === 'phrase') {
+    draft = t.index >= 0 ? { ...state.phrases[t.index] } : { label: '', emoji: '💬' };
+  } else {
+    const b = state.boards[t.boardId];
+    draft = t.index >= 0 ? { ...b.buttons[t.index] } : { type: 'word', label: '', emoji: '⭐', color: t.boardId === 'home' ? 'little' : 'thing' };
+  }
+  renderEditor();
+  $('#editorModal').classList.add('open');
+}
+
+function renderEditor() {
+  const isPhrase = target.kind === 'phrase';
+  const isNew = target.index < 0;
+  $('#editorTitle').textContent = (isNew ? 'Add ' : 'Edit ') + (isPhrase ? 'quick phrase' : draft.type === 'folder' ? 'folder' : 'button');
+
+  const preview = el('div', { class: 'tile preview-tile c-' + (isPhrase ? 'little' : draft.color) + (draft.type === 'folder' ? ' folder' : '') },
+    symbolNode(draft), el('span', { class: 'lbl', text: draft.label || '…' }));
+  const refreshPreview = () => {
+    preview.className = 'tile preview-tile c-' + (isPhrase ? 'little' : draft.color) + (draft.type === 'folder' ? ' folder' : '');
+    preview.replaceChildren(symbolNode(draft), el('span', { class: 'lbl', text: draft.label || '…' }));
+  };
+
+  const body = $('#editorBody');
+  body.replaceChildren(...[
+    el('div', { class: 'row', style: 'margin-bottom:16px; align-items:flex-start' }, preview,
+      el('div', { style: 'flex:1; min-width:220px' },
+        el('div', { class: 'field' }, el('label', { text: isPhrase ? 'Phrase' : 'Word on the button' }),
+          el('input', { type: 'text', value: draft.label, placeholder: isPhrase ? 'e.g. I want to go outside' : 'e.g. swing',
+            oninput: e => { draft.label = e.target.value; refreshPreview(); } })),
+        isPhrase || draft.type === 'folder' ? null :
+          el('div', { class: 'field' }, el('label', { text: 'What it says out loud (optional)' }),
+            el('input', { type: 'text', value: draft.speak || '', placeholder: 'Leave empty to say the word',
+              oninput: e => { draft.speak = e.target.value || undefined; } }))
+      )),
+    el('div', { class: 'field' }, el('label', { text: 'Picture' }),
+      el('div', { class: 'row' },
+        el('input', { type: 'text', value: draft.emoji || '', placeholder: 'emoji', style: 'width:110px; font-size:28px; text-align:center; padding:8px; border-radius:12px; border:2px solid var(--line)',
+          oninput: e => { draft.emoji = e.target.value.trim(); refreshPreview(); } }),
+        el('button', { class: 'btn', onclick: () => $('#photoInput').click() }, '📷 Use a photo'),
+        draft.image ? el('button', { class: 'btn danger small', onclick: () => { delete draft.image; renderEditor(); } }, 'Remove photo') : null),
+      el('div', { class: 'help', text: 'Type an emoji with the 🌐/😊 key on the iPad keyboard, or take a photo of the real thing.' })),
+    isPhrase ? null : el('div', { class: 'field' }, el('div', { class: 'flabel', text: 'Colour' }),
+      el('div', { class: 'colors' }, Object.entries(COLORS).filter(([k]) => draft.type === 'folder' || k !== 'folder').map(([k, n]) =>
+        el('button', { class: 'c-' + k + (draft.color === k ? ' on' : ''), onclick: () => { draft.color = k; renderEditor(); } }, n)))),
+    isPhrase ? null : el('div', { class: 'field' }, el('div', { class: 'flabel', text: 'This button is a…' }),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn' + (draft.type !== 'folder' ? ' primary' : ''), onclick: () => { draft.type = 'word'; if (draft.color === 'folder') draft.color = 'thing'; renderEditor(); } }, '💬 Word (says something)'),
+        el('button', { class: 'btn' + (draft.type === 'folder' ? ' primary' : ''), onclick: () => { draft.type = 'folder'; draft.color = 'folder'; renderEditor(); } }, '📂 Folder (opens more buttons)'))),
+    !isPhrase && !isNew && draft.type === 'folder' && state.boards[draft.target] ?
+      el('div', { class: 'field' }, el('button', { class: 'btn primary', onclick: () => { closeModal('#editorModal'); openBoard(draft.target); } },
+        '📂 Open this folder to edit the buttons inside')) : null,
+    isPhrase || isNew ? null : el('label', { class: 'switch' },
+      el('span', {}, 'Hide for now', el('small', { text: 'The button keeps its place but the child can’t see it. Great for adding words slowly.' })),
+      el('input', { type: 'checkbox', checked: !!draft.hidden, onchange: e => { draft.hidden = e.target.checked || undefined; } })),
+    isNew ? null : el('div', { class: 'field', style: 'margin-top:16px' }, el('div', { class: 'flabel', text: 'Move' }),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn', onclick: () => moveItem(-1) }, '◀ Earlier'),
+        el('button', { class: 'btn', onclick: () => moveItem(1) }, 'Later ▶')))
+  ].filter(Boolean));
+
+  $('#editorFoot').replaceChildren(...[
+    isNew ? null : el('button', { class: 'btn danger', onclick: deleteItem }, '🗑️ Delete'),
+    el('div', { style: 'flex:1' }),
+    el('button', { class: 'btn', onclick: () => closeModal('#editorModal') }, 'Cancel'),
+    el('button', { class: 'btn primary', onclick: saveItem }, 'Save')
+  ].filter(Boolean));
+}
+
+function listFor(t) { return t.kind === 'phrase' ? state.phrases : state.boards[t.boardId].buttons; }
+
+function saveItem() {
+  if (!draft.label.trim()) return toast('Please type a word for the button.');
+  draft.label = draft.label.trim();
+  if (target.kind === 'button' && draft.type === 'folder' && (!draft.target || !state.boards[draft.target])) {
+    draft.target = newId(draft.label);
+    state.boards[draft.target] = { name: draft.label, buttons: [] };
+  }
+  if (target.kind === 'button' && draft.type === 'folder' && state.boards[draft.target]) {
+    state.boards[draft.target].name = draft.label;
+  }
+  if (target.kind === 'button' && draft.type !== 'folder') delete draft.target;
+  const list = listFor(target);
+  if (target.index < 0) list.push(draft); else list[target.index] = draft;
+  if (save()) { closeModal('#editorModal'); renderAll(); }
+}
+
+function moveItem(dir) {
+  const list = listFor(target);
+  const j = target.index + dir;
+  if (j < 0 || j >= list.length) return;
+  [list[target.index], list[j]] = [list[j], list[target.index]];
+  target.index = j;
+  save();
+  renderAll();
+  toast(dir < 0 ? 'Moved earlier' : 'Moved later');
+}
+
+function deleteItem() {
+  const list = listFor(target);
+  const item = list[target.index];
+  const extra = item.type === 'folder' ? ' Everything inside this folder will be removed too.' : '';
+  if (!confirm(`Delete “${item.label}”?${extra}`)) return;
+  list.splice(target.index, 1);
+  if (item.type === 'folder' && item.target && item.target !== 'home') {
+    const stillUsed = Object.values(state.boards).some(b => b.buttons.some(x => x.target === item.target));
+    if (!stillUsed) delete state.boards[item.target];
+  }
+  save();
+  closeModal('#editorModal');
+  renderAll();
+}
+
+$('#photoInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file || !draft) return;
+  try {
+    draft.image = await shrinkImage(file, 360);
+    renderEditor();
+  } catch (err) {
+    toast('Could not use that photo.');
+  }
+});
+
+function shrinkImage(file, max) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image')); };
+    img.src = url;
+  });
+}
+
+/* Stop iPad double-tap zoom and pinch on the board */
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+/* Offline support when served over https */
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+renderAll();
+})();
+</script>
+</body>
+</html>
