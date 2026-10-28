@@ -21,6 +21,11 @@ works without internet, and keeps everything on the iPad.
 - **Quick phrases** for urgent things: "I need help", "I need a break", "I need the toilet",
   "Something hurts"…
 - **🔍 Show** puts the sentence in huge letters, for noisy places.
+- **Your own voice.** Record yourself saying any word or phrase, and that button plays your real
+  voice instead of the iPad voice. Hold ⚙️ → Voice → **Record my voice for many words** takes you
+  through every word one by one. You can also record a single button in Edit mode. Silence is
+  trimmed automatically. One recording covers every button with the same word, and words you
+  haven't recorded still use the iPad voice. Recordings stay on the iPad and are included in backups.
 - **Grown-up settings** (press and **hold** ⚙️ for 1.5 seconds, so children don't open it by accident):
   - Voice, speed and pitch
   - Button size (4–10 across), word size and position

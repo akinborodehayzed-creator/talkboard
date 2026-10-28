@@ -221,6 +221,21 @@
   #show.open { display: flex; }
   #show small { position: absolute; bottom: 24px; left: 0; right: 0; font-size: 18px; font-weight: 500; color: var(--muted); }
 
+  .micbadge { position: absolute; left: 6px; top: 4px; font-size: 16px; }
+  .recorder { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .recorder .btn.rec { background: #FFE3E3; color: #B42318; }
+  .recorder .btn.rec.on { background: #D92D20; color: #fff; animation: pulse 1s ease-in-out infinite; }
+  .recorder .btn:disabled { opacity: .4; }
+  .rec-status { color: var(--muted); font-weight: 600; }
+  @keyframes pulse { 50% { opacity: .7; } }
+  .session { text-align: center; }
+  .session .big-sym { font-size: 96px; line-height: 1.1; }
+  .session .big-sym img { width: 140px; height: 140px; object-fit: cover; border-radius: 18px; }
+  .session .big-word { font-size: 40px; font-weight: 800; margin: 6px 0 4px; }
+  .session .where-from { color: var(--muted); margin-bottom: 18px; }
+  .session .recorder { justify-content: center; margin-bottom: 18px; }
+  .session .progress { height: 10px; background: #E7ECF2; border-radius: 6px; overflow: hidden; margin: 6px 0 18px; }
+  .session .progress div { height: 100%; background: var(--accent); }
   #toast {
     position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: #1D2430; color: #fff; padding: 12px 20px; border-radius: 14px; font-weight: 600; z-index: 40;
@@ -271,6 +286,14 @@
     <header><h2 id="editorTitle">Edit button</h2></header>
     <div class="body" id="editorBody"></div>
     <footer id="editorFoot"></footer>
+  </div>
+</div>
+
+<!-- Record many words one after another -->
+<div class="modal-back" id="sessionModal">
+  <div class="modal">
+    <header><h2>🎙️ Record my voice</h2><button class="btn primary" id="sessionDone">Done</button></header>
+    <div class="body session" id="sessionBody"></div>
   </div>
 </div>
 
@@ -421,7 +444,8 @@ function defaultState() {
       voiceURI: '',
       rate: 0.9,
       pitch: 1.1,
-      volume: 1
+      volume: 1,
+      useRecordings: true
     },
     phrases: [
       { label: 'I need help', emoji: '🆘' },
@@ -525,19 +549,302 @@ if ('speechSynthesis' in window) {
 }
 
 function say(text, onEnd) {
-  if (!text) return;
-  if (!('speechSynthesis' in window)) { toast(text); return; }
+  if (!text) { if (onEnd) onEnd(); return; }
+  if (!('speechSynthesis' in window)) { toast(text); if (onEnd) onEnd(); return; }
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   const s = state.settings;
   const v = voices.find(v => v.voiceURI === s.voiceURI);
   if (v) { u.voice = v; u.lang = v.lang; }
   u.rate = s.rate; u.pitch = s.pitch; u.volume = s.volume;
-  if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
+  if (onEnd) {
+    // iPad sometimes forgets to report the end of speech, so finish after a safe time anyway
+    let done = false;
+    const finish = () => { if (!done) { done = true; onEnd(); } };
+    u.onend = finish; u.onerror = finish;
+    setTimeout(finish, 1500 + text.length * 120 / s.rate);
+  }
   speechSynthesis.speak(u);
 }
 
 function spokenText(item) { return item.speak || item.label; }
+
+/* =========================================================
+   Recorded voice
+   Recordings are kept on this iPad (IndexedDB), keyed by the
+   words they say — so recording “car” once covers every
+   “car” button and phrase.
+   ========================================================= */
+const idb = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((resolve, reject) => {
+    const r = indexedDB.open('talkboard', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('audio');
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction('audio', mode);
+      const req = fn(t.objectStore('audio'));
+      t.oncomplete = () => resolve(req && req.result);
+      t.onerror = () => reject(t.error);
+    });
+  };
+  return {
+    get: k => run('readonly', s => s.get(k)),
+    set: (k, v) => run('readwrite', s => s.put(v, k)),
+    del: k => run('readwrite', s => s.delete(k)),
+    keys: () => run('readonly', s => s.getAllKeys()),
+    clear: () => run('readwrite', s => s.clear())
+  };
+})();
+
+let recorded = new Set();       // keys that have a recording
+const buffers = new Map();      // key -> decoded AudioBuffer
+let audioCtx = null;
+let currentSource = null;
+let speakToken = 0;
+
+function voiceKey(text) {
+  return String(text || '').toLowerCase().replace(/[.,!?¿¡]+/g, '').replace(/\s+/g, ' ').trim();
+}
+function hasRecording(text) { return state.settings.useRecordings && recorded.has(voiceKey(text)); }
+
+function getCtx() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+// Play through the speaker even if the iPad is on silent
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+// iPad only allows sound to start from a tap, so wake the audio up on the first touch
+document.addEventListener('pointerdown', () => { try { getCtx(); } catch (e) {} }, { capture: true });
+
+async function getBuffer(key) {
+  if (buffers.has(key)) return buffers.get(key);
+  const rec = await idb.get(key);
+  if (!rec) return null;
+  const buf = await getCtx().decodeAudioData(rec.data.slice(0));
+  buffers.set(key, buf);
+  return buf;
+}
+
+async function playClip(key) {
+  let buf;
+  try { buf = await getBuffer(key); } catch (e) { buf = null; }
+  if (!buf) return;
+  const ctx = getCtx();
+  return new Promise(resolve => {
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    gain.gain.value = state.settings.volume;
+    src.buffer = buf;
+    src.connect(gain).connect(ctx.destination);
+    src.onended = resolve;
+    currentSource = src;
+    src.start();
+    setTimeout(resolve, buf.duration * 1000 + 400);
+  });
+}
+
+function stopSpeaking() {
+  speakToken++;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (currentSource) { try { currentSource.stop(); } catch (e) {} currentSource = null; }
+}
+
+/* Speak a list of words: your recordings where you have them, the iPad voice for the rest */
+async function speakItems(items, onEnd) {
+  stopSpeaking();
+  const token = speakToken;
+  const parts = [];
+  for (const it of items) {
+    const text = spokenText(it);
+    if (hasRecording(text)) parts.push({ key: voiceKey(text) });
+    else if (parts.length && parts[parts.length - 1].text != null) parts[parts.length - 1].text += ' ' + text;
+    else parts.push({ text });
+  }
+  for (const p of parts) {
+    if (token !== speakToken) return;
+    if (p.key) await playClip(p.key);
+    else await new Promise(r => say(p.text, r));
+  }
+  if (token === speakToken && onEnd) onEnd();
+}
+
+/* ---- Recording from the microphone ---- */
+let micStream = null;
+let mediaRec = null;
+
+async function startMic() {
+  if (!micStream || !micStream.active) {
+    try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  }
+  return micStream;
+}
+function releaseMic() {
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  micStream = null;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+}
+
+async function startRecording() {
+  const stream = await startMic();
+  const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  const chunks = [];
+  mediaRec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  mediaRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const finished = new Promise(resolve => { mediaRec.onstop = () => resolve(new Blob(chunks, { type: mediaRec.mimeType || type || 'audio/mp4' })); });
+  mediaRec.start();
+  return { finished };  // wrapped so callers can wait for the mic first, then for the recording
+}
+function stopRecording() { if (mediaRec && mediaRec.state !== 'inactive') mediaRec.stop(); }
+
+/* Cut off the silence before and after the word, even out the loudness, and save it as a small WAV */
+async function cleanRecording(blob) {
+  const ctx = getCtx();
+  const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const sr = buf.sampleRate;
+  const mono = new Float32Array(buf.length);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels;
+  }
+  const win = Math.max(1, Math.round(sr * 0.01));
+  const rms = [];
+  for (let i = 0; i < mono.length; i += win) {
+    let sum = 0;
+    const end = Math.min(mono.length, i + win);
+    for (let j = i; j < end; j++) sum += mono[j] * mono[j];
+    rms.push(Math.sqrt(sum / (end - i)));
+  }
+  const loudest = Math.max(...rms, 0);
+  if (loudest < 0.01) throw new Error('quiet');
+  const thr = Math.max(0.012, loudest * 0.1);
+  let first = rms.findIndex(v => v > thr);
+  let last = rms.length - 1 - rms.slice().reverse().findIndex(v => v > thr);
+  const start = Math.max(0, first * win - Math.round(sr * 0.05));
+  const stop = Math.min(mono.length, (last + 1) * win + Math.round(sr * 0.12));
+  const seg = mono.slice(start, stop);
+  let peak = 0;
+  for (const v of seg) peak = Math.max(peak, Math.abs(v));
+  const gain = Math.min(8, 0.9 / (peak || 1));
+  for (let i = 0; i < seg.length; i++) seg[i] *= gain;
+  // gentle fade at both ends to avoid clicks
+  const fade = Math.min(seg.length >> 1, Math.round(sr * 0.01));
+  for (let i = 0; i < fade; i++) { seg[i] *= i / fade; seg[seg.length - 1 - i] *= i / fade; }
+
+  const outRate = 22050;
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const off = new OAC(1, Math.max(1, Math.ceil(seg.length * outRate / sr)), outRate);
+  const src = off.createBufferSource();
+  const b = off.createBuffer(1, seg.length, sr);
+  b.getChannelData(0).set(seg);
+  src.buffer = b;
+  src.connect(off.destination);
+  src.start();
+  const out = await off.startRendering();
+  return encodeWav(out.getChannelData(0), outRate);
+}
+
+function encodeWav(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return { type: 'audio/wav', data: buf };
+}
+
+async function saveRecording(text, blob) {
+  const key = voiceKey(text);
+  let rec;
+  try {
+    rec = await cleanRecording(blob);
+  } catch (e) {
+    if (e.message === 'quiet') throw e;
+    rec = { type: blob.type, data: await blob.arrayBuffer() };  // keep it as recorded if cleaning fails
+  }
+  await idb.set(key, rec);
+  buffers.delete(key);
+  recorded.add(key);
+}
+
+async function deleteRecording(text) {
+  const key = voiceKey(text);
+  await idb.del(key);
+  buffers.delete(key);
+  recorded.delete(key);
+}
+
+function micError(e) {
+  if (e && e.message === 'quiet') return toast('I couldn’t hear anything. Hold the iPad closer and try again.');
+  if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
+    return toast('The microphone is blocked. On the iPad: Settings → Apps → Safari → Microphone → Allow, then try again.');
+  toast('Recording didn’t work on this device.');
+}
+
+/* A Record / Play / Remove control for one word or phrase.
+   getText() returns what the button says, so the right recording is used. */
+function recorderWidget(getText, onChange) {
+  const box = el('div', { class: 'recorder' });
+  let state_ = 'idle';
+  let timer = null;
+  let secs = 0;
+
+  const draw = () => {
+    const text = getText();
+    const has = recorded.has(voiceKey(text));
+    box.replaceChildren(...[
+      state_ === 'recording'
+        ? el('button', { class: 'btn rec on', onclick: stop }, `⏹ Stop (${secs}s)`)
+        : el('button', { class: 'btn rec', disabled: state_ === 'busy' || !text.trim(), onclick: start }, has ? '🎙️ Record again' : '🎙️ Record my voice'),
+      has && state_ === 'idle' ? el('button', { class: 'btn', onclick: () => speakItems([{ label: text }]) }, '▶️ Play') : null,
+      has && state_ === 'idle' ? el('button', { class: 'btn danger small', onclick: remove }, 'Remove') : null,
+      el('span', { class: 'rec-status', text:
+        state_ === 'recording' ? 'Say “' + text + '” now…' :
+        state_ === 'busy' ? 'Saving…' :
+        has ? '✅ Uses your voice' : 'Uses the iPad voice' })
+    ].filter(Boolean));
+  };
+  async function start() {
+    stopSpeaking();
+    let session;
+    try { session = await startRecording(); } catch (e) { return micError(e); }
+    state_ = 'recording'; secs = 0; draw();
+    timer = setInterval(() => { secs++; if (secs >= 8) stop(); else draw(); }, 1000);
+    session.finished.then(async blob => {
+      state_ = 'busy'; draw();
+      try {
+        await saveRecording(getText(), blob);
+        state_ = 'idle'; draw();
+        if (onChange) onChange();
+        speakItems([{ label: getText() }]);
+      } catch (e) { state_ = 'idle'; draw(); micError(e); }
+    }).catch(e => { state_ = 'idle'; draw(); micError(e); });
+  }
+  function stop() { clearInterval(timer); stopRecording(); }
+  async function remove() {
+    await deleteRecording(getText());
+    draw();
+    if (onChange) onChange();
+  }
+  box.refresh = () => { if (state_ === 'idle') draw(); };
+  draw();
+  return box;
+}
 
 /* =========================================================
    Rendering
@@ -605,7 +912,8 @@ function renderBoard() {
     grid.append(el('button', { class: cls.join(' '), 'data-i': i, 'aria-label': item.label },
       symbolNode(item),
       el('span', { class: 'lbl', text: item.label }),
-      item.type === 'folder' ? el('span', { class: 'corner', text: '▸' }) : null
+      item.type === 'folder' ? el('span', { class: 'corner', text: '▸' }) : null,
+      editing && recorded.has(voiceKey(spokenText(item))) ? el('span', { class: 'micbadge', text: '🎙️' }) : null
     ));
   });
 
@@ -661,13 +969,13 @@ function pressTile(i, node) {
   flash(node);
 
   if (item.type === 'folder') {
-    if (state.settings.speakFolders) say(item.label);
+    if (state.settings.speakFolders) speakItems([item]);
     return openBoard(item.target);
   }
 
   message.push({ label: item.label, speak: item.speak, emoji: item.emoji, image: item.image, color: item.color });
   renderMessage();
-  if (state.settings.speakOnTap) say(spokenText(item));
+  if (state.settings.speakOnTap) speakItems([item]);
   if (id !== 'home' && state.settings.goHomeAfterFolder) setTimeout(goHome, 150);
 }
 
@@ -676,7 +984,7 @@ function speakMessage() {
   const text = message.map(spokenText).join(' ');
   const bar = $('#message');
   bar.classList.add('speaking');
-  say(text, () => bar.classList.remove('speaking'));
+  speakItems(message.slice(), () => bar.classList.remove('speaking'));
   setTimeout(() => bar.classList.remove('speaking'), Math.max(1500, text.length * 90));
   logHistory(text);
   if (state.settings.clearAfterSpeak) { message = []; setTimeout(renderMessage, 600); }
@@ -702,14 +1010,14 @@ $('#phrases').addEventListener('click', e => {
   if (editing) return openEditor({ kind: 'phrase', index: +t.dataset.i });
   if (!guard()) return;
   flash(t);
-  say(ph.speak || ph.label);
+  speakItems([ph]);
   logHistory(ph.speak || ph.label);
 });
 
 $('#message').addEventListener('click', speakMessage);
 $('#speakBtn').addEventListener('click', speakMessage);
 $('#delBtn').addEventListener('click', () => { message.pop(); renderMessage(); });
-$('#clearBtn').addEventListener('click', () => { message = []; renderMessage(); if ('speechSynthesis' in window) speechSynthesis.cancel(); });
+$('#clearBtn').addEventListener('click', () => { message = []; renderMessage(); stopSpeaking(); });
 $('#homeBtn').addEventListener('click', goHome);
 $('#backBtn').addEventListener('click', () => { if (nav.length > 1) { nav.pop(); renderRow2(); renderBoard(); } });
 
@@ -769,7 +1077,10 @@ function openSettings() {
   renderSettings();
   $('#settingsModal').classList.add('open');
 }
-function closeModal(id) { $(id).classList.remove('open'); }
+function closeModal(id) {
+  $(id).classList.remove('open');
+  if (id === '#editorModal' || id === '#sessionModal') { stopRecording(); releaseMic(); }
+}
 $('#settingsModal [data-close]').addEventListener('click', () => closeModal('#settingsModal'));
 
 function setSetting(key, value) {
@@ -816,7 +1127,18 @@ function renderSettings() {
       rangeField('rate', 'Speed', 0.5, 1.5, 0.05, v => v.toFixed(2) + '×'),
       rangeField('pitch', 'Pitch', 0.5, 2, 0.05, v => v.toFixed(2)),
       rangeField('volume', 'Volume', 0.2, 1, 0.05, v => Math.round(v * 100) + '%'),
-      el('button', { class: 'btn primary', onclick: () => say('Hello! I can talk with my pictures.') }, '▶️ Test the voice')
+      el('button', { class: 'btn primary', onclick: () => say('Hello! I can talk with my pictures.') }, '▶️ Test the iPad voice'),
+      el('hr', { style: 'margin:24px 0;border:0;border-top:1px solid var(--line)' }),
+      el('h3', { style: 'margin:0 0 6px', text: '🎙️ Your own voice' }),
+      el('p', { class: 'help', text: `You have recorded ${recorded.size} of ${voiceList().length} words and phrases. Recorded words play in your voice; the rest use the iPad voice above.` }),
+      toggleRow('useRecordings', 'Use my recordings'),
+      el('div', { class: 'row', style: 'margin-top:12px' },
+        el('button', { class: 'btn primary', onclick: () => { closeModal('#settingsModal'); openSession(); } }, '🎙️ Record my voice for many words'),
+        recorded.size ? el('button', { class: 'btn danger', onclick: async () => {
+          if (!confirm('Delete all your voice recordings?')) return;
+          await idb.clear(); recorded.clear(); buffers.clear(); renderSettings(); toast('Recordings deleted.');
+        } }, 'Delete all recordings') : null),
+      el('p', { class: 'help', text: 'You can also record one button at a time: Edit → tap the button → Record my voice.' })
     );
   }
 
@@ -876,7 +1198,7 @@ function renderSettings() {
 
   if (settingsTab === 'backup') {
     body.append(
-      el('p', { text: 'Everything (your buttons, photos and settings) is saved on this iPad only. Make a backup file now and then, so nothing is lost if the iPad is reset or replaced.' }),
+      el('p', { text: 'Everything (your buttons, photos, voice recordings and settings) is saved on this iPad only. Make a backup file now and then, so nothing is lost if the iPad is reset or replaced.' }),
       el('div', { class: 'row' },
         el('button', { class: 'btn primary', onclick: exportBackup }, '⬇️ Save a backup file'),
         el('button', { class: 'btn', onclick: () => $('#importInput').click() }, '⬆️ Load a backup file')),
@@ -910,8 +1232,26 @@ function renderSettings() {
   }
 }
 
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+function b64ToBuf(b64) {
+  const str = atob(b64);
+  const bytes = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function exportBackup() {
+  const recordings = {};
+  for (const k of await idb.keys()) {
+    const rec = await idb.get(k);
+    if (rec) recordings[k] = { type: rec.type, data: bufToB64(rec.data) };
+  }
+  const blob = new Blob([JSON.stringify({ ...state, recordings })], { type: 'application/json' });
   const a = el('a', { href: URL.createObjectURL(blob), download: `talkboard-backup-${new Date().toISOString().slice(0, 10)}.json` });
   document.body.append(a);
   a.click();
@@ -930,6 +1270,14 @@ $('#importInput').addEventListener('change', async e => {
     data.settings = { ...def.settings, ...(data.settings || {}) };
     data.phrases = data.phrases || def.phrases;
     data.history = data.history || [];
+    if (data.recordings) {
+      await idb.clear(); buffers.clear(); recorded.clear();
+      for (const [k, rec] of Object.entries(data.recordings)) {
+        await idb.set(k, { type: rec.type, data: b64ToBuf(rec.data) });
+        recorded.add(k);
+      }
+    }
+    delete data.recordings;
     state = data; nav = ['home']; message = [];
     save(); renderAll(); renderSettings();
     toast('Backup loaded.');
@@ -937,6 +1285,97 @@ $('#importInput').addEventListener('change', async e => {
     toast('That file is not a Talk Board backup.');
   }
 });
+
+/* =========================================================
+   Record many words one after another
+   ========================================================= */
+const session = { list: [], i: 0, onlyMissing: true };
+
+function voiceList() {
+  const seen = new Set();
+  const list = [];
+  const add = (item, from) => {
+    const text = spokenText(item);
+    const k = voiceKey(text);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    list.push({ text, item, from });
+  };
+  const visited = new Set();
+  const addBoard = id => {
+    if (visited.has(id) || !state.boards[id]) return;
+    visited.add(id);
+    for (const b of state.boards[id].buttons) if (b.type !== 'folder') add(b, state.boards[id].name);
+  };
+  addBoard('home');
+  state.phrases.forEach(p => add(p, 'Quick phrases'));
+  state.boards.home.buttons.forEach(b => b.type === 'folder' && addBoard(b.target));
+  Object.keys(state.boards).forEach(addBoard);
+  return list;
+}
+
+function sessionStep(from, dir) {
+  const n = session.list.length;
+  for (let j = from; j >= 0 && j < n; j += dir) {
+    if (!session.onlyMissing || !recorded.has(voiceKey(session.list[j].text))) return j;
+  }
+  return -1;
+}
+
+function openSession() {
+  session.list = voiceList();
+  session.i = Math.max(0, sessionStep(0, 1));
+  renderSession();
+  $('#sessionModal').classList.add('open');
+}
+
+function renderSession() {
+  const body = $('#sessionBody');
+  const total = session.list.length;
+  const doneCount = session.list.filter(x => recorded.has(voiceKey(x.text))).length;
+  const cur = session.list[session.i];
+  const allDone = session.onlyMissing && sessionStep(0, 1) < 0;
+
+  const next = () => {
+    const j = sessionStep(session.i + 1, 1);
+    if (j < 0) { if (session.onlyMissing && sessionStep(0, 1) < 0) return renderSession(); return toast('That was the last one.'); }
+    session.i = j; renderSession();
+  };
+
+  body.replaceChildren(...[
+    el('div', { style: 'text-align:left; font-weight:600' }, `${doneCount} of ${total} recorded`),
+    el('div', { class: 'progress' }, el('div', { style: `width:${total ? doneCount / total * 100 : 0}%` })),
+    allDone || !cur
+      ? el('div', {}, el('div', { class: 'big-sym', text: '🎉' }), el('div', { class: 'big-word', text: 'All recorded!' }),
+          el('p', { text: 'Every word and phrase now uses your voice.' }))
+      : el('div', {},
+          el('div', { class: 'big-sym' }, symbolNode(cur.item)),
+          el('div', { class: 'big-word', text: cur.text }),
+          el('div', { class: 'where-from', text: 'from ' + cur.from }),
+          recorderWidget(() => cur.text, () => setTimeout(renderSessionProgress, 0)),
+          el('div', { class: 'row', style: 'justify-content:center' },
+            el('button', { class: 'btn', onclick: () => { session.i = Math.max(0, session.i - 1); renderSession(); } }, '⏮ Previous'),
+            el('button', { class: 'btn primary', onclick: next }, 'Next ⏭'))),
+    el('label', { class: 'switch', style: 'margin-top:18px; text-align:left' },
+      el('span', {}, 'Only show words I haven’t recorded yet'),
+      el('input', { type: 'checkbox', checked: session.onlyMissing, onchange: e => {
+        session.onlyMissing = e.target.checked;
+        if (session.onlyMissing) session.i = Math.max(0, sessionStep(session.i, 1) < 0 ? sessionStep(0, 1) : sessionStep(session.i, 1));
+        renderSession();
+      } })),
+    el('p', { class: 'help', style: 'text-align:left', text: 'Tip: find a quiet room, hold the iPad about a hand’s length away, and say each word the way you’d like your child to hear it.' })
+  ].filter(Boolean));
+}
+
+function renderSessionProgress() {
+  const total = session.list.length;
+  const doneCount = session.list.filter(x => recorded.has(voiceKey(x.text))).length;
+  const body = $('#sessionBody');
+  body.firstChild.textContent = `${doneCount} of ${total} recorded`;
+  body.querySelector('.progress div').style.width = (total ? doneCount / total * 100 : 0) + '%';
+}
+
+$('#sessionDone').addEventListener('click', () => { closeModal('#sessionModal'); renderAll(); });
 
 /* =========================================================
    Button editor
@@ -968,18 +1407,22 @@ function renderEditor() {
     preview.replaceChildren(symbolNode(draft), el('span', { class: 'lbl', text: draft.label || '…' }));
   };
 
+  const voiceBox = recorderWidget(() => (spokenText(draft) || '').trim());
+
   const body = $('#editorBody');
   body.replaceChildren(...[
     el('div', { class: 'row', style: 'margin-bottom:16px; align-items:flex-start' }, preview,
       el('div', { style: 'flex:1; min-width:220px' },
         el('div', { class: 'field' }, el('label', { text: isPhrase ? 'Phrase' : 'Word on the button' }),
           el('input', { type: 'text', value: draft.label, placeholder: isPhrase ? 'e.g. I want to go outside' : 'e.g. swing',
-            oninput: e => { draft.label = e.target.value; refreshPreview(); } })),
+            oninput: e => { draft.label = e.target.value; refreshPreview(); voiceBox.refresh(); } })),
         isPhrase || draft.type === 'folder' ? null :
           el('div', { class: 'field' }, el('label', { text: 'What it says out loud (optional)' }),
             el('input', { type: 'text', value: draft.speak || '', placeholder: 'Leave empty to say the word',
-              oninput: e => { draft.speak = e.target.value || undefined; } }))
+              oninput: e => { draft.speak = e.target.value || undefined; voiceBox.refresh(); } }))
       )),
+    el('div', { class: 'field' }, el('div', { class: 'flabel', text: 'Your voice' }), voiceBox,
+      el('div', { class: 'help', text: 'Tap Record, say the word clearly, then tap Stop. Silence at the start and end is trimmed for you.' })),
     el('div', { class: 'field' }, el('label', { text: 'Picture' }),
       el('div', { class: 'row' },
         el('input', { type: 'text', value: draft.emoji || '', placeholder: 'emoji', style: 'width:110px; font-size:28px; text-align:center; padding:8px; border-radius:12px; border:2px solid var(--line)',
@@ -1098,6 +1541,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 
 renderAll();
+idb.keys().then(keys => { recorded = new Set(keys); renderAll(); }).catch(() => {});
 })();
 </script>
 </body>
