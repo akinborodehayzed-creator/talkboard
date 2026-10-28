@@ -26,6 +26,13 @@ works without internet, and keeps everything on the iPad.
   through every word one by one. You can also record a single button in Edit mode. Silence is
   trimmed automatically. One recording covers every button with the same word, and words you
   haven't recorded still use the iPad voice. Recordings stay on the iPad and are included in backups.
+- **AI copy of your voice (ElevenLabs).** Read a short story out loud for about a minute. ElevenLabs
+  learns your voice, and the app then makes every word in it and saves them on the iPad, so they
+  work offline. When online, whole sentences are made in one smooth piece. Set it up with
+  hold ⚙️ → 🤖 AI voice. You need an ElevenLabs account on the Starter plan or higher (copying a
+  voice isn't on the free plan) and an API key from your ElevenLabs profile → API Keys. The key is
+  stored only on the iPad and is never included in backups. The voice is used in this order:
+  your own recordings first, then the AI voice, then the iPad voice.
 - **Grown-up settings** (press and **hold** ⚙️ for 1.5 seconds, so children don't open it by accident):
   - Voice, speed and pitch
   - Button size (4–10 across), word size and position

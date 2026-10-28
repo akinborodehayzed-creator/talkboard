@@ -228,12 +228,15 @@
   .recorder .btn:disabled { opacity: .4; }
   .rec-status { color: var(--muted); font-weight: 600; }
   @keyframes pulse { 50% { opacity: .7; } }
+  .story { font-size: 22px; line-height: 1.6; background: #F6F8FB; border-radius: 14px; padding: 16px 18px; -webkit-user-select: text; user-select: text; }
   .session { text-align: center; }
   .session .big-sym { font-size: 96px; line-height: 1.1; }
   .session .big-sym img { width: 140px; height: 140px; object-fit: cover; border-radius: 18px; }
   .session .big-word { font-size: 40px; font-weight: 800; margin: 6px 0 4px; }
   .session .where-from { color: var(--muted); margin-bottom: 18px; }
   .session .recorder { justify-content: center; margin-bottom: 18px; }
+  .progress { height: 10px; background: #E7ECF2; border-radius: 6px; overflow: hidden; margin: 6px 0 12px; }
+  .progress div { height: 100%; background: var(--accent); }
   .session .progress { height: 10px; background: #E7ECF2; border-radius: 6px; overflow: hidden; margin: 6px 0 18px; }
   .session .progress div { height: 100%; background: var(--accent); }
   #toast {
@@ -294,6 +297,14 @@
   <div class="modal">
     <header><h2>🎙️ Record my voice</h2><button class="btn primary" id="sessionDone">Done</button></header>
     <div class="body session" id="sessionBody"></div>
+  </div>
+</div>
+
+<!-- Copy my voice (AI) -->
+<div class="modal-back" id="cloneModal">
+  <div class="modal">
+    <header><h2>🎙️ Copy my voice</h2><button class="btn" id="cloneClose">Close</button></header>
+    <div class="body" id="cloneBody"></div>
   </div>
 </div>
 
@@ -445,7 +456,9 @@ function defaultState() {
       rate: 0.9,
       pitch: 1.1,
       volume: 1,
-      useRecordings: true
+      useRecordings: true,
+      useAIVoice: true,
+      aiSentences: true
     },
     phrases: [
       { label: 'I need help', emoji: '🆘' },
@@ -610,7 +623,15 @@ let speakToken = 0;
 function voiceKey(text) {
   return String(text || '').toLowerCase().replace(/[.,!?¿¡]+/g, '').replace(/\s+/g, ' ').trim();
 }
-function hasRecording(text) { return state.settings.useRecordings && recorded.has(voiceKey(text)); }
+// Which saved clip to play for some words: your own recording first, then the AI voice
+function clipKey(text) {
+  const k = voiceKey(text);
+  if (!k) return null;
+  if (state.settings.useRecordings && recorded.has(k)) return k;
+  if (state.settings.useAIVoice && recorded.has('ai|' + k)) return 'ai|' + k;
+  return null;
+}
+function personalCount() { return [...recorded].filter(k => !k.startsWith('ai|')).length; }
 
 function getCtx() {
   if (!audioCtx) {
@@ -658,14 +679,25 @@ function stopSpeaking() {
   if (currentSource) { try { currentSource.stop(); } catch (e) {} currentSource = null; }
 }
 
-/* Speak a list of words: your recordings where you have them, the iPad voice for the rest */
-async function speakItems(items, onEnd) {
+/* Speak a list of words: your recordings where you have them, the iPad voice for the rest.
+   With whole: true, a sentence is said in one go by the AI voice when it can be. */
+async function speakItems(items, onEnd, opts) {
   stopSpeaking();
   const token = speakToken;
+  if (opts && opts.whole && items.length > 1) {
+    const key = await aiSentenceClip(items.map(spokenText).join(' '));
+    if (token !== speakToken) return;
+    if (key) {
+      await playClip(key);
+      if (token === speakToken && onEnd) onEnd();
+      return;
+    }
+  }
   const parts = [];
   for (const it of items) {
     const text = spokenText(it);
-    if (hasRecording(text)) parts.push({ key: voiceKey(text) });
+    const key = clipKey(text);
+    if (key) parts.push({ key });
     else if (parts.length && parts[parts.length - 1].text != null) parts[parts.length - 1].text += ' ' + text;
     else parts.push({ text });
   }
@@ -740,12 +772,15 @@ async function cleanRecording(blob) {
   const fade = Math.min(seg.length >> 1, Math.round(sr * 0.01));
   for (let i = 0; i < fade; i++) { seg[i] *= i / fade; seg[seg.length - 1 - i] *= i / fade; }
 
-  const outRate = 22050;
+  return toWav(seg, sr, 22050);
+}
+
+async function toWav(samples, sr, outRate) {
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const off = new OAC(1, Math.max(1, Math.ceil(seg.length * outRate / sr)), outRate);
+  const off = new OAC(1, Math.max(1, Math.ceil(samples.length * outRate / sr)), outRate);
   const src = off.createBufferSource();
-  const b = off.createBuffer(1, seg.length, sr);
-  b.getChannelData(0).set(seg);
+  const b = off.createBuffer(1, samples.length, sr);
+  b.getChannelData(0).set(samples);
   src.buffer = b;
   src.connect(off.destination);
   src.start();
@@ -769,7 +804,10 @@ function encodeWav(samples, rate) {
 }
 
 async function saveRecording(text, blob) {
-  const key = voiceKey(text);
+  await storeClip(voiceKey(text), blob);
+}
+
+async function storeClip(key, blob) {
   let rec;
   try {
     rec = await cleanRecording(blob);
@@ -794,6 +832,251 @@ function micError(e) {
   if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
     return toast('The microphone is blocked. On the iPad: Settings → Apps → Safari → Microphone → Allow, then try again.');
   toast('Recording didn’t work on this device.');
+}
+
+/* =========================================================
+   AI voice (ElevenLabs)
+   A short reading sample is turned into a copy of your voice.
+   Every word is then made once and saved on the iPad, so it
+   still works offline. The key stays on this iPad only and is
+   never put in backups.
+   ========================================================= */
+const AI_STORE = 'talkboard-ai';
+const AI_API = 'https://api.elevenlabs.io/v1';
+let ai = (() => { try { return JSON.parse(localStorage.getItem(AI_STORE)) || {}; } catch (e) { return {}; } })();
+let aiVoices = null;   // voices on the ElevenLabs account, once loaded
+let aiAccount = '';    // short account summary shown in settings
+const gen = { running: false, stop: false, done: 0, total: 0, error: '' };
+
+function saveAI() { try { localStorage.setItem(AI_STORE, JSON.stringify(ai)); } catch (e) {} }
+function aiReady() { return !!(ai.key && ai.voiceId); }
+function aiCount() { return voiceList().filter(x => recorded.has('ai|' + voiceKey(x.text))).length; }
+function voicedCount() { return voiceList().filter(x => recorded.has(voiceKey(x.text)) || recorded.has('ai|' + voiceKey(x.text))).length; }
+
+async function aiFetch(path, opts) {
+  opts = opts || {};
+  const r = await fetch(AI_API + path, { ...opts, headers: { 'xi-api-key': ai.key, ...(opts.headers || {}) } });
+  if (!r.ok) {
+    let msg = '';
+    try {
+      const j = await r.json();
+      const d = j.detail;
+      msg = typeof d === 'string' ? d : d && (d.message || (Array.isArray(d) && d.map(x => x.msg).join('; '))) || '';
+    } catch (e) {}
+    if (r.status === 401) msg = 'The ElevenLabs key was not accepted. ' + msg;
+    const err = new Error(msg || `ElevenLabs returned error ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
+  return r;
+}
+
+async function aiSpeech(text) {
+  const r = await aiFetch(`/text-to-speech/${encodeURIComponent(ai.voiceId)}?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: { stability: 0.5, similarity_boost: 0.85, use_speaker_boost: true }
+    })
+  });
+  return r.blob();
+}
+
+/* Make and save one word or phrase in the AI voice (skipped if it already exists) */
+async function aiMakeClip(text) {
+  const k = voiceKey(text);
+  if (!k || !aiReady() || !navigator.onLine || recorded.has('ai|' + k)) return;
+  await storeClip('ai|' + k, await aiSpeech(text));
+}
+
+/* A whole sentence in the AI voice: saved ones play offline, new ones are made when online */
+async function aiSentenceClip(text) {
+  const key = 'ai|' + voiceKey(text);
+  if (!state.settings.useAIVoice) return null;
+  if (recorded.has(key)) return key;
+  if (!state.settings.aiSentences || !aiReady() || !navigator.onLine) return null;
+  try {
+    const blob = await Promise.race([aiSpeech(text), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 6000))]);
+    await storeClip(key, blob);
+    return key;
+  } catch (e) { return null; }
+}
+
+async function aiClearClips() {
+  for (const k of [...recorded]) if (k.startsWith('ai|')) { await idb.del(k); recorded.delete(k); buffers.delete(k); }
+}
+
+async function playBlob(blob) {
+  stopSpeaking();
+  const buf = await getCtx().decodeAudioData(await blob.arrayBuffer());
+  const src = getCtx().createBufferSource();
+  src.buffer = buf;
+  src.connect(getCtx().destination);
+  currentSource = src;
+  src.start();
+}
+
+function aiTodo() {
+  return voiceList().filter(x => !recorded.has(voiceKey(x.text)) && !recorded.has('ai|' + voiceKey(x.text)));
+}
+
+async function aiMakeAll() {
+  if (gen.running || !aiReady()) return;
+  const todo = aiTodo();
+  Object.assign(gen, { running: true, stop: false, done: 0, total: todo.length, error: '' });
+  updateGen();
+  let next = 0;
+  const worker = async () => {
+    while (!gen.stop && next < todo.length) {
+      const item = todo[next++];
+      for (let attempt = 1; ; attempt++) {
+        try { await aiMakeClip(item.text); gen.done++; break; }
+        catch (e) {
+          if (e.status === 429 && attempt < 4) { await new Promise(r => setTimeout(r, 2000 * attempt)); continue; }
+          gen.error = e.message; gen.stop = true; break;
+        }
+      }
+      updateGen();
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  gen.running = false;
+  updateGen();
+  if (!gen.error && !gen.stop) toast('All words are ready in your AI voice! 🎉');
+}
+
+function updateGen() {
+  const box = document.getElementById('genStatus');
+  if (!box) return;
+  const total = voiceList().length;
+  const ready = voicedCount();
+  box.replaceChildren(...[
+    el('div', { style: 'font-weight:700' },
+      gen.running ? `Making words in your voice… ${gen.done} of ${gen.total}` : `${ready} of ${total} words are ready in your voice`),
+    el('div', { class: 'progress' }, el('div', { style: `width:${gen.running ? (gen.total ? gen.done / gen.total * 100 : 0) : (total ? ready / total * 100 : 0)}%` })),
+    gen.error ? el('div', { style: 'color:var(--danger); font-weight:600', text: 'Stopped: ' + gen.error }) : null,
+    el('div', { class: 'row' },
+      gen.running
+        ? el('button', { class: 'btn danger', onclick: () => { gen.stop = true; } }, '⏹ Stop')
+        : el('button', { class: 'btn primary', disabled: !aiReady() || !aiTodo().length, onclick: aiMakeAll }, aiTodo().length ? '✨ Make all words now' : '✅ All words made'),
+      !gen.running && aiTodo().length ? el('span', { class: 'help', text: `Uses about ${aiTodo().reduce((n, x) => n + x.text.length, 0).toLocaleString()} characters of your ElevenLabs allowance.` }) : null)
+  ].filter(Boolean));
+}
+
+async function aiCheck() {
+  const box = document.getElementById('aiAccount');
+  try {
+    const sub = await (await aiFetch('/user/subscription')).json();
+    const used = sub.character_count, limit = sub.character_limit;
+    aiAccount = `✅ Connected — ${sub.tier || 'your'} plan` + (limit ? `, ${Number(used).toLocaleString()} of ${Number(limit).toLocaleString()} characters used this month` : '');
+    const v = await (await aiFetch('/voices')).json();
+    aiVoices = (v.voices || []).map(x => ({ id: x.voice_id, name: x.name, category: x.category }));
+  } catch (e) {
+    aiAccount = '❌ ' + e.message;
+    aiVoices = null;
+  }
+  if (box) box.textContent = aiAccount;
+  if (settingsTab === 'ai' && $('#settingsModal').classList.contains('open')) renderSettings();
+}
+
+/* ---- Recording a reading sample to copy the voice ---- */
+const CLONE_STORY = 'Good morning, sweetheart! Did you sleep well? Let’s get up and have some breakfast. ' +
+  'Do you want toast or cereal today? Here is your cup of milk. Careful, it’s a little bit hot. ' +
+  'Wow, you finished it all. Well done! Now let’s brush our teeth and get dressed. ' +
+  'Which shirt do you like, the blue one or the red one? Great choice. ' +
+  'After that we can go outside and play. I can see a big dog in the park, and a little bird up in the tree. ' +
+  'Can you hear it singing? It’s nearly time for lunch. Are you hungry? I’m hungry too. ' +
+  'Let’s wash our hands first. Oh no, I dropped my spoon! That’s so silly. ' +
+  'Do you need some help? Just tell me, and I will help you. ' +
+  'If something hurts, or you feel sad, angry, tired or scared, you can tell me too. ' +
+  'I love you very much. Shall we read a book together before bed? One more page, and then it’s time to sleep. ' +
+  'Good night, my darling. See you in the morning.';
+
+const clone = { blob: null, secs: 0, recording: false, busy: false, consent: false, name: 'My voice', timer: null, status: '' };
+
+function openClone() {
+  Object.assign(clone, { blob: null, secs: 0, recording: false, busy: false, status: '' });
+  renderClone();
+  $('#cloneModal').classList.add('open');
+}
+
+function fmtSecs(n) { return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0'); }
+
+function renderClone() {
+  const ready = clone.blob && clone.secs >= 30 && clone.consent && !clone.busy;
+  $('#cloneBody').replaceChildren(...[
+    el('p', { text: 'Find a quiet room. Tap Start, then read the story below out loud in your normal, warm voice — the way you talk to your child. About 1 minute is enough; 2 minutes is even better.' }),
+    el('div', { class: 'story', text: CLONE_STORY }),
+    el('div', { class: 'recorder', style: 'margin:16px 0' }, ...[
+      clone.recording
+        ? el('button', { class: 'btn rec on', onclick: cloneStop }, `⏹ Stop (${fmtSecs(clone.secs)})`)
+        : el('button', { class: 'btn rec', disabled: clone.busy, onclick: cloneStart }, clone.blob ? '🎙️ Record again' : '🎙️ Start reading'),
+      clone.blob && !clone.recording ? el('button', { class: 'btn', onclick: () => playBlob(clone.blob).catch(() => toast('Could not play the sample.')) }, '▶️ Listen') : null,
+      el('span', { class: 'rec-status', text:
+        clone.recording ? (clone.secs < 30 ? 'Keep reading…' : clone.secs < 60 ? 'Good — a little more is even better' : 'Great! Tap Stop whenever you like') :
+        clone.blob ? (clone.secs < 30 ? `Only ${clone.secs} seconds — please record at least 30 seconds` : `Recorded ${fmtSecs(clone.secs)}`) : '' })
+    ].filter(Boolean)),
+    el('div', { class: 'field' }, el('label', { text: 'Name for this voice' }),
+      el('input', { type: 'text', value: clone.name, oninput: e => { clone.name = e.target.value; } })),
+    el('label', { class: 'switch' },
+      el('span', {}, 'This is my own voice', el('small', { text: 'ElevenLabs only allows copying a voice with the speaker’s permission.' })),
+      el('input', { type: 'checkbox', checked: clone.consent, onchange: e => { clone.consent = e.target.checked; renderClone(); } })),
+    el('div', { class: 'row', style: 'margin-top:16px' },
+      el('button', { class: 'btn primary', disabled: !ready, onclick: cloneCreate }, clone.busy ? 'Creating…' : '✨ Create my AI voice'),
+      clone.status ? el('span', { class: 'rec-status', text: clone.status }) : null)
+  ].filter(Boolean));
+}
+
+async function cloneStart() {
+  stopSpeaking();
+  let session;
+  try { session = await startRecording(); } catch (e) { return micError(e); }
+  Object.assign(clone, { recording: true, secs: 0, blob: null });
+  renderClone();
+  clone.timer = setInterval(() => { clone.secs++; if (clone.secs >= 180) cloneStop(); else renderClone(); }, 1000);
+  session.finished.then(blob => { clone.blob = blob; clone.recording = false; renderClone(); });
+}
+function cloneStop() { clearInterval(clone.timer); stopRecording(); }
+
+async function cloneCreate() {
+  clone.busy = true; clone.status = 'Sending your sample to ElevenLabs…'; renderClone();
+  try {
+    let file;
+    try {
+      const buf = await getCtx().decodeAudioData(await clone.blob.arrayBuffer());
+      const mono = new Float32Array(buf.length);
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const d = buf.getChannelData(c);
+        for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels;
+      }
+      const wav = await toWav(mono, buf.sampleRate, 24000);
+      file = new File([wav.data], 'sample.wav', { type: 'audio/wav' });
+    } catch (e) {
+      file = new File([clone.blob], 'sample.m4a', { type: clone.blob.type || 'audio/mp4' });
+    }
+    const form = new FormData();
+    form.append('name', (clone.name || 'My voice').trim() + ' (Talk Board)');
+    form.append('files', file);
+    form.append('description', 'Voice for Talk Board');
+    const res = await (await aiFetch('/voices/add', { method: 'POST', body: form })).json();
+    await aiClearClips();
+    ai.voiceId = res.voice_id;
+    ai.voiceName = (clone.name || 'My voice').trim();
+    saveAI();
+    aiVoices = null;
+    closeModal('#cloneModal');
+    settingsTab = 'ai';
+    openSettings();
+    aiCheck();
+    if (res.requires_verification) alert('ElevenLabs wants you to verify this voice on their website (elevenlabs.io → Voices) before it can be used.');
+    else if (confirm('Your AI voice is ready! Make all the words in your voice now?')) aiMakeAll();
+  } catch (e) {
+    clone.status = '❌ ' + e.message;
+  }
+  clone.busy = false;
+  if ($('#cloneModal').classList.contains('open')) renderClone();
 }
 
 /* A Record / Play / Remove control for one word or phrase.
@@ -984,7 +1267,7 @@ function speakMessage() {
   const text = message.map(spokenText).join(' ');
   const bar = $('#message');
   bar.classList.add('speaking');
-  speakItems(message.slice(), () => bar.classList.remove('speaking'));
+  speakItems(message.slice(), () => bar.classList.remove('speaking'), { whole: true });
   setTimeout(() => bar.classList.remove('speaking'), Math.max(1500, text.length * 90));
   logHistory(text);
   if (state.settings.clearAfterSpeak) { message = []; setTimeout(renderMessage, 600); }
@@ -1064,6 +1347,7 @@ function setEditing(on) {
 let settingsTab = 'voice';
 const TABS = [
   ['voice', '🗣️ Voice'],
+  ['ai', '🤖 AI voice'],
   ['speaking', '💬 Speaking'],
   ['display', '🖼️ Display'],
   ['edit', '✏️ Edit'],
@@ -1079,7 +1363,7 @@ function openSettings() {
 }
 function closeModal(id) {
   $(id).classList.remove('open');
-  if (id === '#editorModal' || id === '#sessionModal') { stopRecording(); releaseMic(); }
+  if (id === '#editorModal' || id === '#sessionModal' || id === '#cloneModal') { stopRecording(); releaseMic(); }
 }
 $('#settingsModal [data-close]').addEventListener('click', () => closeModal('#settingsModal'));
 
@@ -1130,16 +1414,65 @@ function renderSettings() {
       el('button', { class: 'btn primary', onclick: () => say('Hello! I can talk with my pictures.') }, '▶️ Test the iPad voice'),
       el('hr', { style: 'margin:24px 0;border:0;border-top:1px solid var(--line)' }),
       el('h3', { style: 'margin:0 0 6px', text: '🎙️ Your own voice' }),
-      el('p', { class: 'help', text: `You have recorded ${recorded.size} of ${voiceList().length} words and phrases. Recorded words play in your voice; the rest use the iPad voice above.` }),
+      el('p', { class: 'help', text: `You have recorded ${personalCount()} of ${voiceList().length} words and phrases. Recorded words play in your real voice. Don’t want to record them all? Use the 🤖 AI voice tab to copy your voice from a short sample.` }),
       toggleRow('useRecordings', 'Use my recordings'),
       el('div', { class: 'row', style: 'margin-top:12px' },
         el('button', { class: 'btn primary', onclick: () => { closeModal('#settingsModal'); openSession(); } }, '🎙️ Record my voice for many words'),
-        recorded.size ? el('button', { class: 'btn danger', onclick: async () => {
+        personalCount() ? el('button', { class: 'btn danger', onclick: async () => {
           if (!confirm('Delete all your voice recordings?')) return;
-          await idb.clear(); recorded.clear(); buffers.clear(); renderSettings(); toast('Recordings deleted.');
+          for (const k of [...recorded]) if (!k.startsWith('ai|')) { await idb.del(k); recorded.delete(k); buffers.delete(k); }
+          renderSettings(); toast('Recordings deleted.');
         } }, 'Delete all recordings') : null),
       el('p', { class: 'help', text: 'You can also record one button at a time: Edit → tap the button → Record my voice.' })
     );
+  }
+
+  if (settingsTab === 'ai') {
+    const keyInput = el('input', { type: 'password', value: ai.key || '', placeholder: 'Paste your ElevenLabs API key', autocomplete: 'off', style: 'flex:1; min-width:220px' });
+    const voiceOptions = (aiVoices || []).slice();
+    if (ai.voiceId && !voiceOptions.some(v => v.id === ai.voiceId)) voiceOptions.unshift({ id: ai.voiceId, name: ai.voiceName || 'My voice' });
+    const genBox = el('div', { id: 'genStatus', style: 'margin-bottom:8px' });
+    body.append(...[
+      el('p', { text: 'Copy your voice with ElevenLabs, an AI voice service. You read a short story out loud for about a minute, and the AI learns how you sound. Then the app makes every word in your voice and saves them on the iPad, so it still works offline. Words you recorded yourself are still used first.' }),
+      el('h3', { style: 'margin:18px 0 6px', text: 'Step 1 — Connect ElevenLabs' }),
+      el('div', { class: 'field' },
+        el('div', { class: 'row' }, keyInput,
+          el('button', { class: 'btn primary', onclick: () => { ai.key = keyInput.value.trim(); saveAI(); aiAccount = ai.key ? 'Checking…' : ''; renderSettings(); if (ai.key) aiCheck(); } }, 'Save key')),
+        el('div', { class: 'help', id: 'aiAccount', style: 'font-weight:600', text: aiAccount }),
+        el('div', { class: 'help', text: 'Sign up at elevenlabs.io (copying a voice needs the Starter plan or higher). Then go to your profile → API Keys → Create key, and paste it here. The key is kept only on this iPad and is never put in backups.' })),
+      ai.key ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 2 — Your AI voice' }) : null,
+      ai.key ? el('div', { class: 'field' },
+        el('div', { class: 'row' },
+          el('button', { class: 'btn primary', onclick: () => { closeModal('#settingsModal'); openClone(); } }, '🎙️ Copy my voice (read a short story)'),
+          aiReady() ? el('button', { class: 'btn', onclick: async () => {
+            try { await playBlob(await aiSpeech('Hello! I can talk with my pictures.')); } catch (e) { toast(e.message); }
+          } }, '▶️ Test my AI voice') : null),
+        voiceOptions.length ? el('div', { style: 'margin-top:12px' },
+          el('label', { style: 'font-weight:700', text: 'Voice in use' }),
+          el('select', { style: 'width:100%; font-size:18px; padding:12px; border-radius:12px; border:2px solid var(--line); margin-top:6px', onchange: async e => {
+            const id = e.target.value;
+            if (id === ai.voiceId) return;
+            if (aiCount() && !confirm('Switch voice? The words already made in the old voice will be deleted and need making again.')) { e.target.value = ai.voiceId || ''; return; }
+            await aiClearClips();
+            ai.voiceId = id || '';
+            ai.voiceName = (voiceOptions.find(v => v.id === id) || {}).name || '';
+            saveAI();
+            renderSettings();
+          } },
+            el('option', { value: '', text: '— choose a voice —' }),
+            voiceOptions.map(v => el('option', { value: v.id, selected: v.id === ai.voiceId, text: v.name + (v.category === 'cloned' ? ' (your copy)' : '') }))),
+          el('div', { class: 'help', text: 'Made a voice on the ElevenLabs website instead? It shows up in this list too.' })) : null) : null,
+      aiReady() ? el('h3', { style: 'margin:18px 0 6px', text: 'Step 3 — Make every word in your voice' }) : null,
+      aiReady() ? genBox : null,
+      aiReady() ? toggleRow('useAIVoice', 'Use the AI voice', 'For words you haven’t recorded yourself.') : null,
+      aiReady() ? toggleRow('aiSentences', 'Say whole sentences in the AI voice when online', 'Sounds smoother than word by word. Offline, it uses the saved words.') : null,
+      aiReady() && aiCount() ? el('button', { class: 'btn danger', style: 'margin-top:12px', onclick: async () => {
+        if (!confirm('Delete all words made in the AI voice? (Your own recordings are kept.)')) return;
+        await aiClearClips(); renderSettings();
+      } }, 'Delete AI-made words') : null
+    ].filter(Boolean));
+    updateGen();
+    if (ai.key && !aiVoices && !aiAccount) { aiAccount = 'Checking…'; aiCheck(); }
   }
 
   if (settingsTab === 'speaking') {
@@ -1375,6 +1708,7 @@ function renderSessionProgress() {
   body.querySelector('.progress div').style.width = (total ? doneCount / total * 100 : 0) + '%';
 }
 
+$('#cloneClose').addEventListener('click', () => { clearInterval(clone.timer); closeModal('#cloneModal'); });
 $('#sessionDone').addEventListener('click', () => { closeModal('#sessionModal'); renderAll(); });
 
 /* =========================================================
@@ -1472,7 +1806,11 @@ function saveItem() {
   if (target.kind === 'button' && draft.type !== 'folder') delete draft.target;
   const list = listFor(target);
   if (target.index < 0) list.push(draft); else list[target.index] = draft;
-  if (save()) { closeModal('#editorModal'); renderAll(); }
+  if (save()) {
+    closeModal('#editorModal');
+    renderAll();
+    if (draft.type !== 'folder') aiMakeClip(spokenText(draft)).catch(() => {});
+  }
 }
 
 function moveItem(dir) {
