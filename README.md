@@ -27,6 +27,13 @@ works without internet, and keeps everything on the iPad.
 - **🎮 Find it!** is a learning game. The app asks "Can you find the bird?", cheers and gives a star
   for the right picture, and gently shows the answer after a wrong try. You choose the topic and
   how many pictures to show (2–6).
+- **🗣️ Talk time** is a set of speech games that listen through the microphone and reward the
+  child's own voice. Any sound counts, because the app can't (and shouldn't) judge whether a word
+  is said right. **Blow the balloon** grows the balloon with any sound until it pops.
+  **Ready, set… GO!** says "Ready, set…", waits, and the child's sound makes the car, train or
+  rocket go. **Copy me** says an animal or fun sound, or an early word (m, b, p, d sounds), twice
+  and then listens for a try. A grown-up can tap 👍 when the app misses a try, and the setup
+  screen shows how many sounds were made today.
 - **Your own voice.** Record yourself saying any word or phrase, and that button plays your real
   voice instead of the iPad voice. Hold ⚙️ → Voice → **Record my voice for many words** takes you
   through every word one by one. You can also record a single button in Edit mode. Silence is

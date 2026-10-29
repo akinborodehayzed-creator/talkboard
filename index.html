@@ -292,6 +292,28 @@
     font-size: 64px; font-weight: 900; pointer-events: none; animation: pop .8s ease;
   }
   .bigcheer div:first-child { font-size: 160px; }
+  .talkstage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; position: relative; overflow: hidden; }
+  .talkcue { font-size: 34px; font-weight: 800; text-align: center; min-height: 46px; }
+  .talkbig { font-size: min(42vh, 60vw); line-height: 1; transition: transform .12s ease-out; user-select: none; }
+  .talkbig.bounce { animation: pop .6s ease; }
+  .talkword { font-size: 54px; font-weight: 900; letter-spacing: 2px; }
+  .meter { width: min(520px, 80vw); height: 26px; border-radius: 13px; background: #EADFC8; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #6CC2A0, #22A45D); border-radius: 13px; transition: width .08s linear; }
+  .meter.heard i { background: linear-gradient(90deg, #FFB347, #FF7A45); }
+  .talkbtns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; padding-top: 8px; }
+  .talkbtns .btn { font-size: 20px; padding: 12px 22px; }
+  .btn.said { background: #22A45D; color: #fff; border-color: #22A45D; }
+  .ear { animation: glow .7s ease-in-out infinite alternate; display: inline-block; }
+  .racer { position: absolute; font-size: min(30vh, 40vw); line-height: 1; transition: transform 1.4s cubic-bezier(.5,0,.8,.4); }
+  .racer.left.gone { transform: translateX(-120vw); }
+  .racer.up.gone { transform: translateY(-120vh); }
+  .gamecards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .gamecard { border: 3px solid var(--line); border-radius: 20px; background: #fff; padding: 14px; text-align: left; font-size: 17px; }
+  .gamecard.on { border-color: #22A45D; outline: 3px solid #22A45D; }
+  .gamecard b { display: block; font-size: 22px; margin-bottom: 4px; }
+  .gamecard .sym { font-size: 44px; }
+  .tipbox { background: #fff; border-radius: 16px; padding: 12px 16px; margin-top: 16px; font-size: 16px; line-height: 1.45; }
+  .tipbox li { margin: 4px 0; }
   #toast {
     position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: #1D2430; color: #fff; padding: 12px 20px; border-radius: 14px; font-weight: 600; z-index: 40;
@@ -323,6 +345,7 @@
   <div id="phrasesWrap"><div id="phrases"></div></div>
   <button class="tool" id="actBtn" aria-label="Activity pages">📋</button>
   <button class="tool" id="gameBtn" aria-label="Find it game">🎮</button>
+  <button class="tool" id="talkBtn" aria-label="Talk time speech games">🗣️</button>
   <button class="tool" id="showBtn" aria-label="Show message in big letters">🔍</button>
   <button class="tool" id="gearBtn" aria-label="Grown-up settings (hold)"><span class="fill"></span>⚙️</button>
 </div>
@@ -1681,6 +1704,311 @@ function bigCheer() {
 
 $('#gameBtn').addEventListener('click', openGame);
 
+/* =========================================================
+   “Talk time”: speech games that reward the child's own voice.
+   Based on common speech-therapy methods for late talkers:
+   - any voice sound is rewarded (vocal play comes before words)
+   - "Ready, set… GO!": the grown-up pauses and waits for the child to fill the gap
+   - copy me: easy sounds first (animal and fun sounds), then words with
+     early sounds made at the front of the mouth (m, b, p, d, n)
+   The app can't tell if a word is said right, and shouldn't: every try counts.
+   ========================================================= */
+const TALK_SOUNDS = {
+  fun: [
+    { label: 'moo', emoji: '🐮', speak: 'moooo' }, { label: 'baa', emoji: '🐑', speak: 'baaa' },
+    { label: 'woof', emoji: '🐶', speak: 'woof woof' }, { label: 'meow', emoji: '🐱' },
+    { label: 'quack', emoji: '🦆', speak: 'quack quack' }, { label: 'oink', emoji: '🐷', speak: 'oink oink' },
+    { label: 'beep beep', emoji: '🚗' }, { label: 'choo choo', emoji: '🚂' },
+    { label: 'vroom', emoji: '🏎️', speak: 'vroooom' }, { label: 'whee', emoji: '🛝', speak: 'wheeee' },
+    { label: 'uh-oh', emoji: '😮', speak: 'uh oh' }, { label: 'wow', emoji: '🤩', speak: 'wowww' },
+    { label: 'mmm', emoji: '😋', speak: 'mmmmm' }, { label: 'pop', emoji: '🫧' },
+    { label: 'boo', emoji: '👻', speak: 'boooo' }, { label: 'aaah', emoji: '🦁', speak: 'aaaaah' }
+  ],
+  words: [
+    { label: 'mama', emoji: '👩' }, { label: 'dada', emoji: '👨' }, { label: 'more', emoji: '➕' },
+    { label: 'up', emoji: '⬆️' }, { label: 'bye bye', emoji: '👋' }, { label: 'ball', emoji: '⚽' },
+    { label: 'bubble', emoji: '🫧' }, { label: 'baby', emoji: '👶' }, { label: 'no', emoji: '🙅' },
+    { label: 'go', emoji: '🟢' }, { label: 'bee', emoji: '🐝' }, { label: 'boat', emoji: '⛵' },
+    { label: 'moon', emoji: '🌙' }, { label: 'me', emoji: '🙋' }, { label: 'done', emoji: '✅' },
+    { label: 'night night', emoji: '😴' }
+  ]
+};
+const RACERS = [{ emoji: '🚗', dir: 'left' }, { emoji: '🚂', dir: 'left' }, { emoji: '🚀', dir: 'up' }];
+
+const talk = { mode: 'balloon', set: 'fun', sens: 'medium', racer: 0, stars: 0, run: 0, stopMeter: null, noMic: false, card: null, last: null, size: 0 };
+
+function talkLogToday() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!state.talkLog || state.talkLog.day !== today) state.talkLog = { day: today, sounds: 0, words: [] };
+  return state.talkLog;
+}
+function talkCount(word) {
+  const log = talkLogToday();
+  log.sounds++;
+  if (word && !log.words.includes(word)) log.words.push(word);
+  save();
+}
+
+/* Listen to the microphone. onLevel(level 0–1, voiceNow) runs every frame and onVoice runs once a
+   sound has lasted long enough to be a real try (not a click or a bump). Returns a stop function. */
+async function startListening(onLevel, onVoice) {
+  const stream = await startMic();
+  const ctx = getCtx();
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 1024;
+  src.connect(an);
+  const data = new Float32Array(an.fftSize);
+  const base = { low: 0.035, medium: 0.018, high: 0.009 }[talk.sens];
+  const t0 = performance.now();
+  let noise = 0, noiseN = 0, th = null, loudMs = 0, last = t0, stopped = false;
+  const tick = () => {
+    if (stopped) return;
+    const now = performance.now(), dt = now - last;
+    last = now;
+    an.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const rms = Math.sqrt(sum / data.length);
+    if (now - t0 < 300) { noise += rms; noiseN++; }     // first moment: learn how noisy the room is
+    else {
+      if (th == null) th = Math.min(base * 4, Math.max(base, (noiseN ? noise / noiseN : 0) * 3));
+      const on = rms > th;
+      loudMs = on ? loudMs + dt : Math.max(0, loudMs - dt / 2);
+      onLevel(Math.min(1, rms / (th * 5)), on);
+      if (loudMs > 180 && onVoice) { const f = onVoice; onVoice = null; f(); }
+    }
+  };
+  const timer = setInterval(tick, 30);
+  return () => { stopped = true; clearInterval(timer); try { src.disconnect(); } catch (e) {} };
+}
+
+function talkStopMeter(keepMic) {
+  if (talk.stopMeter) { talk.stopMeter(); talk.stopMeter = null; }
+  if (!keepMic) releaseMic();   // let the speaker play at full volume again
+}
+
+/* Listen for up to ms. Resolves true when the child makes a sound (or the grown-up taps 👍). */
+function talkListen(ms, meter, onLevel) {
+  const run = talk.run;
+  return new Promise(async resolve => {
+    let done = false, timer;
+    const finish = v => { if (done) return; done = true; clearTimeout(timer); talkStopMeter(); talk.heard = null; resolve(v); };
+    talk.heard = () => finish(true);
+    timer = setTimeout(() => finish(false), talk.noMic ? ms + 3000 : ms);
+    if (talk.noMic) return;
+    try {
+      talk.stopMeter = await startListening((lvl, on) => {
+        if (run !== talk.run) return finish(false);
+        if (meter) { meter.firstChild.style.width = Math.round(lvl * 100) + '%'; meter.classList.toggle('heard', on); }
+        if (onLevel) onLevel(lvl, on);
+      }, () => finish(true));
+      if (done) talkStopMeter();
+    } catch (e) {
+      talk.noMic = true;
+      toast('The microphone is off. Tap 👍 when your child makes a sound.');
+    }
+  });
+}
+
+const talkSay = items => new Promise(r => speakItems(items, r));
+const talkWait = ms => new Promise(r => setTimeout(r, ms));
+
+function openTalk() {
+  talk.stars = 0;
+  renderTalkSetup();
+  $('#gameModal').classList.add('open');
+}
+function closeTalk() {
+  talk.run++;
+  talkStopMeter();
+  closeGame();
+}
+
+function renderTalkSetup() {
+  talk.run++;
+  talkStopMeter();
+  const log = talkLogToday();
+  const card = (mode, emoji, name, about) => el('button', { class: 'gamecard' + (talk.mode === mode ? ' on' : ''), onclick: () => { talk.mode = mode; renderTalkSetup(); } },
+    el('span', { class: 'sym', text: emoji }), el('b', { text: name }), el('span', { text: about }));
+  const choice = (list, cur, set) => el('div', { class: 'row' }, list.map(([v, txt]) =>
+    el('button', { class: 'btn' + (cur === v ? ' primary' : ''), onclick: () => { set(v); renderTalkSetup(); } }, txt)));
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'gamebar' },
+      el('button', { class: 'btn', onclick: closeTalk }, '✖ Close'),
+      el('h2', { text: '🗣️ Talk time' })),
+    el('div', { class: 'gamesetup' },
+      el('p', { text: 'Games that reward your child for using their voice. Any sound counts — the app cheers for every try.' }),
+      el('div', { class: 'gamecards' },
+        card('balloon', '🎈', 'Blow the balloon', 'Any sound makes the balloon grow until it pops. Start here.'),
+        card('go', '🚗', 'Ready, set… GO!', 'The app says “Ready, set…” and waits. Your child’s sound makes it go.'),
+        card('copy', '🐮', 'Copy me', 'The app says a sound or word twice, then listens for your child to try.')),
+      talk.mode === 'go' ? [el('div', { class: 'flabel', style: 'margin-top:18px', text: 'What goes' }),
+        choice(RACERS.map((r, i) => [i, r.emoji]), talk.racer, v => talk.racer = v)] : null,
+      talk.mode === 'copy' ? [el('div', { class: 'flabel', style: 'margin-top:18px', text: 'What to copy' }),
+        choice([['fun', '🐮 Fun sounds (easiest)'], ['words', '👋 First words']], talk.set, v => talk.set = v)] : null,
+      el('div', { class: 'flabel', style: 'margin-top:18px', text: 'How easily the microphone hears' }),
+      choice([['high', 'Very easily (quiet child)'], ['medium', 'Normal'], ['low', 'Only loud sounds (noisy room)']], talk.sens, v => talk.sens = v),
+      el('button', { class: 'btn primary big', style: 'margin-top:20px', onclick: talkStart }, '▶️ Start'),
+      el('p', { class: 'help', text: log.sounds ? `Today: ${log.sounds} sound${log.sounds === 1 ? '' : 's'}` + (log.words.length ? ` · tried: ${log.words.join(', ')}` : '') : 'Today: no sounds yet.' }),
+      el('div', { class: 'tipbox' },
+        el('b', { text: '💡 How to play together' }),
+        el('ul', {},
+          el('li', { text: 'Sit face to face at your child’s eye level, so they can see your mouth.' }),
+          el('li', { text: 'Play too! Make the sounds yourself first and have fun with it.' }),
+          el('li', { text: 'Wait. After “Ready, set…”, count to 5 in your head before you help.' }),
+          el('li', { text: 'Cheer for every try, even if it doesn’t sound right. Never ask them to “say it properly”.' }),
+          el('li', { text: 'Tap 👍 if you hear your child try and the app missed it.' }),
+          el('li', { text: 'Keep it to about 5 minutes and stop while it’s still fun. Use the same games in real life: “Ready, set… go!” on the swing.' }))))
+  );
+}
+
+function talkScreen(...kids) {
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'gamebar' },
+      el('button', { class: 'btn', onclick: closeTalk }, '✖ Close'),
+      el('button', { class: 'btn', onclick: renderTalkSetup }, '⚙️ Change'),
+      el('div', { class: 'stars', text: talk.stars ? '⭐'.repeat(Math.min(talk.stars, 10)) + (talk.stars > 10 ? ' ×' + talk.stars : '') : '' })),
+    el('div', { class: 'talkstage' }, ...kids));
+}
+function talkStar(node) {
+  talk.stars++;
+  if (node) burst(node);
+  if (talk.stars % 5 === 0) {
+    const c = el('div', { class: 'bigcheer' }, el('div', { text: '🏆' }), el('div', { text: `${talk.stars} stars!` }));
+    document.body.append(c);
+    setTimeout(() => c.remove(), 1800);
+  }
+  const s = $('#gameBody .stars');
+  if (s) s.textContent = '⭐'.repeat(Math.min(talk.stars, 10)) + (talk.stars > 10 ? ' ×' + talk.stars : '');
+}
+const saidBtn = () => el('button', { class: 'btn said', onclick: () => talk.heard && talk.heard() }, '👍 They said it');
+
+function talkStart() {
+  talk.run++;
+  if (talk.mode === 'balloon') talkBalloon();
+  else if (talk.mode === 'go') talkGo();
+  else talkCopy();
+}
+
+/* 🎈 Any sound blows the balloon up. Bigger, longer sounds fill it faster. */
+async function talkBalloon() {
+  const run = talk.run;
+  const colours = ['', 'hue-rotate(120deg)', 'hue-rotate(220deg)', 'hue-rotate(300deg)'];
+  const balloon = el('div', { class: 'talkbig', text: '🎈', style: `transform: scale(.35); filter: ${colours[talk.stars % 4]}` });
+  const cue = el('div', { class: 'talkcue', text: 'Make a sound to blow it up!' });
+  const meter = el('div', { class: 'meter' }, el('i'));
+  talkScreen(cue, balloon, meter, el('div', { class: 'talkbtns' },
+    el('button', { class: 'btn', onclick: () => talkSay([{ label: 'aaaaah' }]) }, '🔊 Show me'),
+    saidBtn()));
+  talk.size = 0;
+  await talkSay([{ label: talk.stars ? 'Again! Make a big sound!' : 'Let’s blow up the balloon! Aaaah!' }]);
+  if (run !== talk.run) return;
+  const pumped = new Promise(async resolve => {
+    talk.heard = () => { talk.size = Math.min(1, talk.size + 0.25); grow(); };
+    const grow = () => {
+      balloon.style.transform = `scale(${0.35 + talk.size * 1.05})`;
+      if (talk.size >= 1) resolve();
+    };
+    if (talk.noMic) return;
+    try {
+      talk.stopMeter = await startListening((lvl, on) => {
+        if (run !== talk.run) return;
+        meter.firstChild.style.width = Math.round(lvl * 100) + '%';
+        meter.classList.toggle('heard', on);
+        if (on) { talk.size = Math.min(1, talk.size + 0.007 + lvl * 0.012); grow(); }
+      });
+    } catch (e) {
+      talk.noMic = true;
+      toast('The microphone is off. Tap 👍 each time your child makes a sound.');
+    }
+  });
+  await pumped;
+  if (run !== talk.run) return;
+  talk.heard = null;
+  talkStopMeter();
+  balloon.textContent = '💥';
+  balloon.classList.add('bounce');
+  talkStar(balloon);
+  talkCount();
+  cue.textContent = 'POP!';
+  await talkSay([{ label: ['Pop! Wow!', 'Pop! Great sound!', 'Pop! You did it!'][talk.stars % 3] }]);
+  if (run === talk.run) setTimeout(() => run === talk.run && talkBalloon(), 600);
+}
+
+/* 🚗 Ready, set… (wait) …GO! The child's sound fills the gap. If they don't, the app models “go!” itself. */
+async function talkGo() {
+  const run = talk.run;
+  const r = RACERS[talk.racer] || RACERS[0];
+  const racer = el('div', { class: 'racer ' + r.dir, text: r.emoji });
+  const cue = el('div', { class: 'talkcue', text: 'Ready…' });
+  const meter = el('div', { class: 'meter' }, el('i'));
+  talkScreen(cue, el('div', { style: 'height:34vh' }), racer, meter, el('div', { class: 'talkbtns' }, saidBtn()));
+  await talkWait(500);
+  await talkSay([{ label: 'Ready…' }]);
+  if (run !== talk.run) return;
+  cue.textContent = 'Ready, set…';
+  await talkSay([{ label: 'set…' }]);
+  if (run !== talk.run) return;
+  cue.replaceChildren(el('span', { class: 'ear', text: '👂' }), ' …');
+  const said = await talkListen(6000, meter);
+  if (run !== talk.run) return;
+  cue.textContent = 'GO!';
+  racer.classList.add('gone');
+  if (said) {
+    talkStar(racer);
+    talkCount('go');
+    await talkSay([{ label: ['Go! Yes!', 'You said go!', 'Go go go!'][talk.stars % 3] }]);
+  } else {
+    await talkSay([{ label: 'Go!' }]);
+  }
+  if (run === talk.run) setTimeout(() => run === talk.run && talkGo(), 1200);
+}
+
+/* 🐮 Copy me: show the picture, say it twice slowly, wait for the child's turn, then say it again. */
+async function talkCopy(same) {
+  const run = talk.run;
+  const list = TALK_SOUNDS[talk.set];
+  if (!same || !talk.card) {
+    let c;
+    do { c = list[Math.floor(Math.random() * list.length)]; } while (c === talk.last);
+    talk.card = talk.last = c;
+  }
+  const c = talk.card;
+  const pic = el('div', { class: 'talkbig', style: 'font-size:min(34vh,50vw)', text: c.emoji });
+  const word = el('div', { class: 'talkword', text: c.label });
+  const cue = el('div', { class: 'talkcue', text: 'Listen…' });
+  const meter = el('div', { class: 'meter' }, el('i'));
+  talkScreen(cue, pic, word, meter, el('div', { class: 'talkbtns' },
+    el('button', { class: 'btn', onclick: () => { talk.run++; talkCopy(true); } }, '🔁 Again'),
+    saidBtn(),
+    el('button', { class: 'btn', onclick: () => { talk.run++; talkCopy(); } }, '➡️ Next')));
+  await talkWait(400);
+  await talkSay([c]);
+  if (run !== talk.run) return;
+  pic.classList.add('bounce');
+  await talkWait(700);
+  await talkSay([c]);
+  if (run !== talk.run) return;
+  cue.replaceChildren(el('span', { class: 'ear', text: '👂' }), ' Your turn!');
+  const said = await talkListen(6000, meter, lvl => { pic.style.transform = `scale(${1 + lvl * 0.25})`; });
+  if (run !== talk.run) return;
+  pic.style.transform = '';
+  if (said) {
+    pic.classList.remove('bounce'); void pic.offsetWidth; pic.classList.add('bounce');
+    cue.textContent = ['Yes!', 'Great talking!', 'Well done!'][talk.stars % 3];
+    talkStar(pic);
+    talkCount(c.label);
+    await talkSay([{ label: 'Yes!' }, c]);   // say it again the right way, no correcting
+  } else {
+    cue.textContent = 'My turn…';
+    await talkSay([c]);
+  }
+  if (run === talk.run) setTimeout(() => run === talk.run && talkCopy(), 1300);
+}
+
+$('#talkBtn').addEventListener('click', openTalk);
+
 $('#showBtn').addEventListener('click', () => {
   const text = message.map(m => m.label).join(' ');
   if (!text) return toast('Build a message first, then tap 🔍 to show it big.');
@@ -2263,7 +2591,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {
