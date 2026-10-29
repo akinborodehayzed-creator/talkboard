@@ -34,6 +34,9 @@ works without internet, and keeps everything on the iPad.
   rocket go. **Copy me** says an animal or fun sound, or an early word (m, b, p, d sounds), twice
   and then listens for a try. A grown-up can tap 👍 when the app misses a try, and the setup
   screen shows how many sounds were made today.
+- **The games talk in the same voice as the board.** Everything they say is made in your AI voice
+  when a game opens (online), and is saved for offline use. It is also listed under "Games" in
+  Record my voice, so you can record it yourself.
 - **Your own voice.** Record yourself saying any word or phrase, and that button plays your real
   voice instead of the iPad voice. Hold ⚙️ → Voice → **Record my voice for many words** takes you
   through every word one by one. You can also record a single button in Edit mode. Silence is

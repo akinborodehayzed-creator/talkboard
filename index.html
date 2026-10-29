@@ -832,7 +832,13 @@ async function speakItems(items, onEnd, opts) {
   const parts = [];
   for (const it of items) {
     const text = spokenText(it);
-    const key = clipKey(text);
+    let key = clipKey(text);
+    // Games: wait a moment for the AI voice to make a missing word, so it doesn't switch to the iPad voice
+    if (!key && opts && opts.wait && state.settings.useAIVoice && aiReady() && navigator.onLine) {
+      try { await Promise.race([aiMakeClip(text), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 5000))]); } catch (e) {}
+      if (token !== speakToken) return;
+      key = clipKey(text);
+    }
     if (key) parts.push({ key });
     else if (parts.length && parts[parts.length - 1].text != null) parts[parts.length - 1].text += ' ' + text;
     else parts.push({ text });
@@ -1595,6 +1601,7 @@ function gameTopics() {
 
 function openGame() {
   game.stars = 0;
+  warmGameVoice();
   renderGameSetup();
   $('#gameModal').classList.add('open');
 }
@@ -1645,7 +1652,7 @@ function nextRound() {
 }
 
 function askTarget() {
-  speakItems([{ label: 'Can you find' }, game.target], null, { whole: true });
+  speakItems([{ label: 'Can you find' }, game.target], null, { whole: true, wait: true });
 }
 
 function renderGameRound() {
@@ -1672,11 +1679,11 @@ function pickChoice(c, node) {
     node.classList.add('right');
     burst(node);
     const cheer = game.stars % 5 === 0 ? 'Wow! Great job!' : ['Yes!', 'Well done!', 'You found it!', 'Great job!'][game.stars % 4];
-    speakItems([game.target, { label: cheer }], () => setTimeout(nextRound, 500), { whole: true });
+    speakItems([game.target, { label: cheer }], () => setTimeout(nextRound, 500), { whole: true, wait: true });
     if (game.stars % 5 === 0) bigCheer();
   } else {
     node.classList.remove('wrong'); void node.offsetWidth; node.classList.add('wrong');
-    speakItems([{ label: 'That is' }, c, { label: 'Can you find' }, game.target], null, { whole: true });
+    speakItems([{ label: 'That is' }, c, { label: 'Can you find' }, game.target], null, { whole: true, wait: true });
     if (game.help) {
       const right = [...document.querySelectorAll('.gamegrid .tile')][game.choices.indexOf(game.target)];
       if (right) right.classList.add('hint');
@@ -1733,6 +1740,28 @@ const TALK_SOUNDS = {
     { label: 'night night', emoji: '😴' }
   ]
 };
+/* Everything the games say, so it can be made in the AI voice (or recorded) like the board words */
+function gamePhrases() {
+  return [
+    'Can you find', 'That is', 'Yes!', 'Well done!', 'You found it!', 'Great job!', 'Wow! Great job!',
+    'aaaaah', 'Let’s blow up the balloon! Aaaah!', 'Again! Make a big sound!', 'Pop! Wow!', 'Pop! Great sound!', 'Pop! You did it!',
+    'Ready…', 'set…', 'Go!', 'Go! Yes!', 'You said go!', 'Go go go!'
+  ].map(label => ({ label })).concat(TALK_SOUNDS.fun, TALK_SOUNDS.words);
+}
+/* When a game opens, quietly make any game words that aren't in the AI voice yet */
+let warming = false;
+async function warmGameVoice() {
+  if (warming || !state.settings.useAIVoice || !aiReady() || !navigator.onLine) return;
+  warming = true;
+  try {
+    for (const p of gamePhrases()) {
+      const text = spokenText(p);
+      if (clipKey(text)) continue;
+      try { await aiMakeClip(text); } catch (e) { if (e.keyProblem || e.status === 402 || !navigator.onLine) break; }  // skip one bad word, stop on key or credit problems
+    }
+  } finally { warming = false; }
+}
+
 const RACERS = [{ emoji: '🚗', dir: 'left' }, { emoji: '🚂', dir: 'left' }, { emoji: '🚀', dir: 'up' }];
 
 const talk = { mode: 'balloon', set: 'fun', sens: 'medium', racer: 0, stars: 0, run: 0, stopMeter: null, noMic: false, card: null, last: null, size: 0 };
@@ -1811,11 +1840,12 @@ function talkListen(ms, meter, onLevel) {
   });
 }
 
-const talkSay = items => new Promise(r => speakItems(items, r));
+const talkSay = items => new Promise(r => speakItems(items, r, { wait: true }));
 const talkWait = ms => new Promise(r => setTimeout(r, ms));
 
 function openTalk() {
   talk.stars = 0;
+  warmGameVoice();
   renderTalkSetup();
   $('#gameModal').classList.add('open');
 }
@@ -2346,6 +2376,7 @@ function voiceList() {
   state.phrases.forEach(p => add(p, 'Quick phrases'));
   state.boards.home.buttons.forEach(b => b.type === 'folder' && addBoard(b.target));
   Object.keys(state.boards).forEach(addBoard);
+  gamePhrases().forEach(p => add(p, 'Games'));
   return list;
 }
 
@@ -2591,7 +2622,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {
