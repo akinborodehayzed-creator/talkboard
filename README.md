@@ -27,6 +27,10 @@ works without internet, and keeps everything on the iPad.
 - **🎮 Find it!** is a learning game. The app asks "Can you find the bird?", cheers and gives a star
   for the right picture, and gently shows the answer after a wrong try. You choose the topic and
   how many pictures to show (2–6).
+- **📸 What do you want?** Take photos of real things in your house (his cup, the juice, his
+  ball), name them, and turn on what you have today. Your child touches a photo and the app says
+  "I want water" in your chosen voice, with the photo shown big. Hold 🔒 to change the photos.
+  Photos stay on the iPad and are included in backups.
 - **🗣️ Talk time** is a set of speech games that listen through the microphone and reward the
   child's own voice. Any sound counts, because the app can't (and shouldn't) judge whether a word
   is said right. **Blow the balloon** grows the balloon with any sound until it pops.

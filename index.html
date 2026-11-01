@@ -292,6 +292,38 @@
     font-size: 64px; font-weight: 900; pointer-events: none; animation: pop .8s ease;
   }
   .bigcheer div:first-child { font-size: 160px; }
+  .pickbar { flex-wrap: wrap; }
+  .pickbar .btn { font-size: 19px; }
+  .holdbtn { margin-left: auto; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
+  .holdbtn:active { background: #FFE3A8; }
+  .pickgrid { flex: 1; min-height: 0; display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; padding-bottom: 6px; }
+  .pickgrid.n1 { grid-template-columns: 1fr; }
+  .pickgrid.n2 { grid-template-columns: 1fr 1fr; }
+  .pickgrid.n4 { grid-template-columns: 1fr 1fr; }
+  .pickgrid.many { overflow-y: auto; grid-auto-rows: 260px; }
+  @media (orientation: portrait) {
+    .pickgrid.n2, .pickgrid.n3 { grid-template-columns: 1fr; }
+    .pickgrid.n5, .pickgrid.n6 { grid-template-columns: 1fr 1fr; }
+  }
+  .pickcard { position: relative; min-height: 0; padding: 0; overflow: hidden; border: 5px solid #fff; border-radius: 26px; background: #fff; box-shadow: 0 3px 10px rgba(0,0,0,.12); }
+  .pickcard img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .pickcard .lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px; background: rgba(255,255,255,.92); font-size: 30px; font-weight: 800; text-align: center; }
+  .pickcard:active { transform: scale(.97); border-color: #22A45D; }
+  .pickbig { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 12px; }
+  .pickbig img { flex: 1; min-height: 0; max-width: 100%; object-fit: contain; border-radius: 26px; animation: pop .5s ease; }
+  .pickbig .say { font-size: 44px; font-weight: 900; text-align: center; }
+  .pmgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .pm { background: #fff; border-radius: 16px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .pm img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; background: #eee; }
+  .pm.off img { opacity: .3; filter: grayscale(1); }
+  .pm b { text-align: center; font-size: 18px; }
+  .pm .row { justify-content: center; }
+  .pm .btn { font-size: 15px; padding: 8px 10px; }
+  .pmadd { min-height: 170px; border: 3px dashed var(--line); border-radius: 16px; background: transparent; font-size: 20px; font-weight: 800; color: var(--muted); }
+  .pmadd span { display: block; font-size: 52px; }
+  .pickform { overflow-y: auto; padding-bottom: 24px; }
+  .pickform img { display: block; max-height: 34vh; max-width: 100%; border-radius: 16px; margin-bottom: 12px; }
+  .pickform input[type=text] { width: 100%; font-size: 22px; padding: 12px; border: 2px solid var(--line); border-radius: 12px; margin-bottom: 14px; }
   .talkstage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; position: relative; overflow: hidden; }
   .talkcue { font-size: 34px; font-weight: 800; text-align: center; min-height: 46px; }
   .talkbig { font-size: min(42vh, 60vw); line-height: 1; transition: transform .12s ease-out; user-select: none; }
@@ -343,6 +375,7 @@
 <div id="row2">
   <div id="where"></div>
   <div id="phrasesWrap"><div id="phrases"></div></div>
+  <button class="tool" id="pickBtn" aria-label="What do you want? Photo choices">📸</button>
   <button class="tool" id="actBtn" aria-label="Activity pages">📋</button>
   <button class="tool" id="gameBtn" aria-label="Find it game">🎮</button>
   <button class="tool" id="talkBtn" aria-label="Talk time speech games">🗣️</button>
@@ -401,6 +434,7 @@
 <div id="show"><div id="showText"></div><small>Tap anywhere to close</small></div>
 <div id="toast"></div>
 <input type="file" id="photoInput" accept="image/*" hidden>
+<input type="file" id="choicePhoto" accept="image/*" hidden>
 <input type="file" id="importInput" accept="application/json,.json" hidden>
 
 <script>
@@ -724,19 +758,19 @@ function spokenText(item) { return item.speak || item.label; }
    words they say — so recording “car” once covers every
    “car” button and phrase.
    ========================================================= */
-const idb = (() => {
+const makeIdb = (dbName, store) => {
   let dbp;
   const open = () => dbp || (dbp = new Promise((resolve, reject) => {
-    const r = indexedDB.open('talkboard', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('audio');
+    const r = indexedDB.open(dbName, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(store);
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   }));
   const run = async (mode, fn) => {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const t = db.transaction('audio', mode);
-      const req = fn(t.objectStore('audio'));
+      const t = db.transaction(store, mode);
+      const req = fn(t.objectStore(store));
       t.oncomplete = () => resolve(req && req.result);
       t.onerror = () => reject(t.error);
     });
@@ -748,7 +782,9 @@ const idb = (() => {
     keys: () => run('readonly', s => s.getAllKeys()),
     clear: () => run('readwrite', s => s.clear())
   };
-})();
+};
+const idb = makeIdb('talkboard', 'audio');
+const photoDb = makeIdb('talkboard-photos', 'photos');
 
 let recorded = new Set();       // keys that have a recording
 const buffers = new Map();      // key -> decoded AudioBuffer
@@ -1712,6 +1748,217 @@ function bigCheer() {
 $('#gameBtn').addEventListener('click', openGame);
 
 /* =========================================================
+   “What do you want?”: real photos of things in the house.
+   A grown-up takes the photos and turns on what is there today.
+   The child touches one and the app says it for them.
+   ========================================================= */
+const pick = { set: null, draft: null };
+const photoCache = new Map();
+
+function choices() {
+  if (!state.choices) state.choices = {
+    sets: [
+      { id: 'drinks', name: 'Drinks', emoji: '🥤', lead: 'I want' },
+      { id: 'food', name: 'Food', emoji: '🍽️', lead: 'I want' },
+      { id: 'toys', name: 'Toys', emoji: '🧸', lead: 'I want' },
+      { id: 'places', name: 'Places', emoji: '🚪', lead: 'I want to go to' }
+    ],
+    items: []
+  };
+  return state.choices;
+}
+const pickItems = (set, all) => choices().items.filter(x => x.set === set && (all || !x.hidden));
+const pickSet = id => choices().sets.find(s => s.id === id);
+const pickSay = (label, set) => `${(pickSet(set) || {}).lead || 'I want'} ${label}`;
+
+function photoNode(id) {
+  const img = el('img', { alt: '', draggable: 'false' });
+  if (photoCache.has(id)) img.src = photoCache.get(id);
+  else photoDb.get(id).then(src => { if (src) { photoCache.set(id, src); img.src = src; } }).catch(() => {});
+  return img;
+}
+
+function holdBtn(text, ms, fn) {
+  let timer;
+  const stop = () => clearTimeout(timer);
+  return el('button', { class: 'btn holdbtn', oncontextmenu: e => e.preventDefault(),
+    onpointerdown: e => { e.preventDefault(); timer = setTimeout(fn, ms); },
+    onpointerup: stop, onpointerleave: stop, onpointercancel: stop }, text);
+}
+
+function openPick() {
+  warmGameVoice();
+  $('#gameModal').classList.add('open');
+  if (!choices().items.length) return renderPickManage();
+  renderPick(true);
+}
+
+function pickAsk() { speakItems([{ label: 'What do you want?' }], null, { wait: true }); }
+
+/* The child's screen: only what the grown-up turned on */
+function renderPick(ask) {
+  const sets = choices().sets.filter(s => pickItems(s.id).length);
+  if (!sets.length) return renderPickManage();
+  if (!sets.some(s => s.id === pick.set)) pick.set = sets[0].id;
+  const items = pickItems(pick.set);
+  const n = items.length;
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'gamebar pickbar' },
+      el('button', { class: 'btn', onclick: closeGame }, '✖ Close'),
+      sets.length > 1 ? sets.map(s => el('button', { class: 'btn' + (s.id === pick.set ? ' primary' : ''), onclick: () => { pick.set = s.id; renderPick(true); } }, s.emoji + ' ' + s.name)) : null,
+      el('button', { class: 'btn', onclick: pickAsk }, '🔊 Ask'),
+      holdBtn('🔒 Hold to change', 1000, renderPickManage)),
+    el('div', { class: 'pickgrid ' + (n > 6 ? 'many' : 'n' + n) }, items.map(x =>
+      el('button', { class: 'pickcard', 'aria-label': x.label, onclick: () => pickChosen(x) }, photoNode(x.id), el('span', { class: 'lbl', text: x.label }))))
+  );
+  if (ask) pickAsk();
+}
+
+function pickChosen(x) {
+  const say = spokenText(x);
+  logHistory(say);
+  speakItems([x], null, { wait: true });
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'pickbig', style: 'padding-top:16px' },
+      photoNode(x.id),
+      el('div', { class: 'say', text: say }),
+      el('div', { class: 'talkbtns' },
+        el('button', { class: 'btn', onclick: () => speakItems([x], null, { wait: true }) }, '🔊 Say it again'),
+        el('button', { class: 'btn primary', onclick: () => renderPick(true) }, '↩️ Choose again')))
+  );
+}
+
+/* The grown-up's screen: add photos, and turn on what is in the house today */
+function renderPickManage() {
+  stopSpeaking();
+  const c = choices();
+  if (!pickSet(pick.set)) pick.set = c.sets[0].id;
+  const set = pickSet(pick.set);
+  const items = pickItems(pick.set, true);
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'gamebar pickbar' },
+      el('button', { class: 'btn primary', onclick: () => c.items.some(x => !x.hidden) ? renderPick(true) : closeGame() }, '✅ Done'),
+      el('h2', { text: '📸 My photos' })),
+    el('div', { class: 'gamesetup' },
+      el('p', { text: 'Take photos of real things in your house. Your child sees only the ones that are turned on.' }),
+      el('div', { class: 'row' },
+        c.sets.map(s => el('button', { class: 'btn' + (s.id === pick.set ? ' primary' : ''), onclick: () => { pick.set = s.id; renderPickManage(); } }, s.emoji + ' ' + s.name)),
+        el('button', { class: 'btn', onclick: pickNewSet }, '➕ New group')),
+      el('div', { class: 'pmgrid', style: 'margin-top:14px' },
+        el('button', { class: 'pmadd', onclick: () => { pick.draft = null; $('#choicePhoto').click(); } }, el('span', { text: '📷' }), 'Add a photo'),
+        items.map(x => el('div', { class: 'pm' + (x.hidden ? ' off' : '') },
+          photoNode(x.id),
+          el('b', { text: x.label }),
+          el('div', { class: 'row' },
+            el('button', { class: 'btn' + (x.hidden ? '' : ' primary'), onclick: () => { x.hidden = !x.hidden; save(); renderPickManage(); } }, x.hidden ? 'Off' : 'On'),
+            el('button', { class: 'btn', onclick: () => { pick.draft = { ...x, sayEdited: true }; renderPickForm(); } }, '✏️'),
+            el('button', { class: 'btn danger', onclick: () => pickDelete(x) }, '🗑'))))),
+      !items.length && set.id.startsWith('s') ? el('button', { class: 'btn danger', style: 'margin-top:12px', onclick: () => pickDeleteSet(set) }, `Delete “${set.name}”`) : null,
+      el('div', { class: 'tipbox' },
+        el('b', { text: '💡 How to use it' }),
+        el('ul', {},
+          el('li', { text: 'Start with just 2 photos, like water and juice. Add more when your child gets the idea.' }),
+          el('li', { text: 'Take one thing at a time on a plain background, so the photo is easy to see.' }),
+          el('li', { text: 'Only turn on what you really have today. When your child picks it, give it to them straight away.' }),
+          el('li', { text: 'Ask “What do you want?”, hold up the iPad and wait. If they pull you to the fridge, open this screen and show them the photos.' }),
+          el('li', { text: 'Before they can do it alone, gently help their finger to the photo, then give them the thing.' }))))
+  );
+}
+
+function pickNewSet() {
+  const name = (prompt('Name for this group? (for example Snacks, Outside)') || '').trim();
+  if (!name) return;
+  const id = 's' + Date.now();
+  choices().sets.push({ id, name, emoji: '📁', lead: 'I want' });
+  pick.set = id;
+  save();
+  renderPickManage();
+}
+function pickDeleteSet(set) {
+  const c = choices();
+  c.sets = c.sets.filter(s => s !== set);
+  pick.set = c.sets[0].id;
+  save();
+  renderPickManage();
+}
+async function pickDelete(x) {
+  if (!confirm(`Delete the photo of ${x.label}?`)) return;
+  const c = choices();
+  c.items = c.items.filter(i => i.id !== x.id);
+  photoCache.delete(x.id);
+  save();
+  await photoDb.del(x.id).catch(() => {});
+  renderPickManage();
+}
+
+$('#choicePhoto').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const photo = await shrinkImage(file, 900);
+    if (pick.draft) pick.draft.photo = photo;
+    else pick.draft = { label: '', speak: '', set: pick.set, photo };
+    renderPickForm();
+  } catch (err) {
+    toast('Could not use that photo.');
+  }
+});
+
+function renderPickForm() {
+  const d = pick.draft;
+  const say = el('input', { type: 'text', value: d.speak || (d.label ? pickSay(d.label, d.set) : ''), oninput: e => { d.speak = e.target.value; d.sayEdited = true; } });
+  const name = el('input', { type: 'text', placeholder: 'For example: water', value: d.label, oninput: e => {
+    d.label = e.target.value;
+    if (!d.sayEdited) { d.speak = d.label.trim() ? pickSay(d.label.trim(), d.set) : ''; say.value = d.speak; }
+  } });
+  $('#gameBody').replaceChildren(
+    el('div', { class: 'gamebar pickbar' },
+      el('button', { class: 'btn', onclick: renderPickManage }, 'Cancel'),
+      el('h2', { text: d.id ? 'Change this photo' : 'New photo' }),
+      el('button', { class: 'btn primary', style: 'margin-left:auto', onclick: pickSave }, '💾 Save')),
+    el('div', { class: 'pickform' },
+      d.photo ? el('img', { src: d.photo, alt: '' }) : photoNode(d.id),
+      el('button', { class: 'btn', style: 'margin-bottom:14px', onclick: () => $('#choicePhoto').click() }, '📷 Use a different photo'),
+      el('div', { class: 'flabel', text: 'What is it?' }), name,
+      el('div', { class: 'flabel', text: 'The app says' }), say,
+      el('div', { class: 'flabel', text: 'Group' }),
+      el('div', { class: 'row' }, choices().sets.map(s => el('button', { class: 'btn' + (s.id === d.set ? ' primary' : ''), onclick: () => {
+        d.set = s.id;
+        if (!d.sayEdited && d.label.trim()) d.speak = pickSay(d.label.trim(), d.set);
+        renderPickForm();
+      } }, s.emoji + ' ' + s.name))))
+  );
+  if (!d.id) name.focus();
+}
+
+async function pickSave() {
+  const d = pick.draft;
+  const label = d.label.trim();
+  if (!label) return toast('Type what is in the photo first.');
+  const speak = (d.speak || '').trim() || pickSay(label, d.set);
+  const c = choices();
+  const id = d.id || 'p' + Date.now();
+  try {
+    if (d.photo) { await photoDb.set(id, d.photo); photoCache.set(id, d.photo); }
+  } catch (e) {
+    return toast('Could not save the photo. The iPad may be full.');
+  }
+  const old = c.items.find(x => x.id === id);
+  if (old) Object.assign(old, { label, speak, set: d.set });
+  else c.items.push({ id, label, speak, set: d.set });
+  pick.set = d.set;
+  pick.draft = null;
+  if (!save()) return;
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  if (state.settings.useAIVoice && aiReady() && navigator.onLine) aiMakeClip(speak).catch(() => {});
+  renderPickManage();
+  toast('Saved.');
+}
+
+$('#pickBtn').addEventListener('click', openPick);
+
+/* =========================================================
    “Talk time”: speech games that reward the child's own voice.
    Based on common speech-therapy methods for late talkers:
    - any voice sound is rewarded (vocal play comes before words)
@@ -1743,10 +1990,11 @@ const TALK_SOUNDS = {
 /* Everything the games say, so it can be made in the AI voice (or recorded) like the board words */
 function gamePhrases() {
   return [
-    'Can you find', 'That is', 'Yes!', 'Well done!', 'You found it!', 'Great job!', 'Wow! Great job!',
+    'What do you want?', 'Can you find', 'That is', 'Yes!', 'Well done!', 'You found it!', 'Great job!', 'Wow! Great job!',
     'aaaaah', 'Let’s blow up the balloon! Aaaah!', 'Again! Make a big sound!', 'Pop! Wow!', 'Pop! Great sound!', 'Pop! You did it!',
     'Ready…', 'set…', 'Go!', 'Go! Yes!', 'You said go!', 'Go go go!'
-  ].map(label => ({ label })).concat(TALK_SOUNDS.fun, TALK_SOUNDS.words);
+  ].map(label => ({ label })).concat(TALK_SOUNDS.fun, TALK_SOUNDS.words,
+    choices().items.map(x => ({ label: x.label, speak: x.speak, emoji: '📷' })));
 }
 /* When a game opens, quietly make any game words that aren't in the AI voice yet */
 let warming = false;
@@ -2316,7 +2564,9 @@ async function exportBackup() {
     const rec = await idb.get(k);
     if (rec) recordings[k] = { type: rec.type, data: bufToB64(rec.data) };
   }
-  const blob = new Blob([JSON.stringify({ ...state, recordings })], { type: 'application/json' });
+  const photos = {};
+  for (const k of await photoDb.keys()) photos[k] = await photoDb.get(k);
+  const blob = new Blob([JSON.stringify({ ...state, recordings, photos })], { type: 'application/json' });
   const a = el('a', { href: URL.createObjectURL(blob), download: `talkboard-backup-${new Date().toISOString().slice(0, 10)}.json` });
   document.body.append(a);
   a.click();
@@ -2343,6 +2593,11 @@ $('#importInput').addEventListener('change', async e => {
       }
     }
     delete data.recordings;
+    if (data.photos) {
+      await photoDb.clear(); photoCache.clear();
+      for (const [k, src] of Object.entries(data.photos)) await photoDb.set(k, src);
+    }
+    delete data.photos;
     state = data; nav = ['home']; message = [];
     save(); renderAll(); renderSettings();
     toast('Backup loaded.');
@@ -2622,7 +2877,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
    version. Buttons, photos and recordings are kept.
    Bump APP_VERSION here and in version.json for each release.
    ========================================================= */
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 $('#versionLabel').textContent = 'v' + APP_VERSION;
 
 async function checkForUpdate(auto) {
